@@ -77,11 +77,24 @@ since it runs natively, it is actually the *most capable* CLI on the pad
 
 ```
 /usr/local/lib/node_modules/@anthropic-ai/claude-code   pinned 2.1.112 (npm -g)
-/usr/local/bin/claude                                   official entry point (cli.js)
+/usr/local/bin/claude-bin                               real npm entry point → cli.js
+/usr/local/bin/claude                                   #!/bin/sh wrapper
+                                                        exec taskset -c ${CLAUDE_CPUS:-0,1,2,3} \
+                                                          nice -n 5 /usr/local/bin/claude-bin "$@"
 /usr/local/bin/claude-token-save                        OAuth token persister (this repo)
 ~/.claude/settings.json                                 env pinning + autoUpdates: false
 ~/.claude/.oauth_token                                  1-year token (mode 600)
 ```
+
+`npm install -g` creates `claude` as a symlink to `cli.js`; the installer keeps
+that real target as `claude-bin` and replaces the public `claude` name with a
+small CPU-affinity wrapper (`taskset`/`nice`, both from util-linux/coreutils —
+no extra dependency). `npm ls -g @anthropic-ai/claude-code` still reports 2.1.112
+(it reads `node_modules`, not the bin link). The catch: **any** npm operation on
+the package (`install`, `update`, `rebuild`) recreates the plain symlink and
+drops the wrapper — the installer is idempotent (it re-clears a stale wrapper
+before `npm install` and re-wraps after, keying idempotence on the resolved
+`cli.js`, never on `bin/claude`), so re-running `install.sh` restores it.
 
 ## 5. Authentication (Claude Pro/Max account, no API key)
 
@@ -117,6 +130,32 @@ On 1 GB of RAM with SD-card swap, memory exhaustion freezes the machine before
 the kernel OOM killer reacts — the installer enables **earlyoom**. Operating
 rules on the pad: one heavy CLI at a time, and bound batch workloads
 (`systemd-run --scope -p MemoryMax=600M`, `timeout`).
+
+### Runtime CPU throttle (`CLAUDE_CPUS`)
+
+Every launch goes through the `claude` wrapper (see the layout above):
+
+```
+exec taskset -c "${CLAUDE_CPUS:-0,1,2,3}" nice -n 5 /usr/local/bin/claude-bin "$@"
+```
+
+By default it runs on **all 4 cores at `nice 5`**. To pin a session to a subset
+of cores **without reinstalling** — to leave headroom for another job (the pad
+runs one heavy CLI at a time) or to stay cool on a fan-less board — set the
+variable at launch:
+
+```
+CLAUDE_CPUS=0,1 claude -p "…"     # 2 cores; verify with:
+grep Cpus_allowed_list /proc/<pid>/status   # → 0-1
+```
+
+The mask is inherited by every child process and worker thread of the CLI. This
+is the same knob as `GROK_CPUS` on the sister
+[grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi) — where it is a
+thermal necessity (a 4-core emulated agentic run froze the H3 at 102 °C). Native
+pure-JS Claude is far gentler on the SoC (no thermal runaway observed), so here
+the knob is mostly about **sharing cores**, not survival — but it is wired
+identically for consistency across the CLI family.
 
 ## 7. Maintenance
 

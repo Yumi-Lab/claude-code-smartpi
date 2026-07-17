@@ -48,6 +48,15 @@ claude-token-save sk-ant-oat01-…
 | `claude -p "question"` | One-shot answer (full agent mode: reads/writes files, runs commands) |
 | `claude setup-token` | Sign in with a Claude Pro/Max account (one-time OAuth code, browser on any machine) |
 | `claude-token-save <token>` | Persist the 1-year token (`~/.claude/.oauth_token` + `settings.json`) |
+| `CLAUDE_CPUS=0,1 claude …` | Throttle to a CPU subset for this launch — no reinstall (default = all 4 cores) |
+
+Every `claude` launch goes through a small wrapper (`taskset … nice -n 5`) that
+runs it on **all 4 cores at low priority** by default. To free cores for another
+job — or stay cool on a fan-less board — throttle it **without reinstalling**:
+`CLAUDE_CPUS=0,1 claude …` binds it to 2 cores (same knob as `GROK_CPUS` on the
+sister [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)). The
+real entry point stays reachable as `claude-bin`. Any npm operation on the
+package resets the plain symlink — re-run `install.sh` to restore the wrapper.
 
 ⚠️ **Never update Claude Code beyond 2.1.112 on 32-bit** — every newer version
 is a 64-bit Bun binary. The installer disables auto-update; to repair or
@@ -72,12 +81,28 @@ reinstall, re-run `install.sh`.
 Full details (npm archaeology, dead ends, auth pitfalls, thermal measurements):
 [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
 
-## Target hardware
+## Target hardware & measured performance
 
 Tested on a Yumi SmartPad (Allwinner H3, 4× Cortex-A7 @ 1.2 GHz, 1 GB RAM,
 Debian 13 trixie armhf). Any armv7l SBC with ≥ 1 GB RAM should work. Measured
 performance: `claude --version` 6.6 s · one-shot answer ~23 s · multi-turn
-agentic sessions stable. `earlyoom` is installed as a memory safety net.
+agentic sessions stable.
+
+On 1 GB of RAM with SD-card swap, memory exhaustion freezes the machine before the
+kernel OOM killer reacts — the installer enables **earlyoom**. Rule on the pad: one
+heavy CLI at a time.
+
+## Sister projects (same board, other CLIs)
+
+- [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi) — official xAI
+  Grok CLI, via QEMU 64-on-32 emulation of the static Rust binary.
+- [kimi-cli-smartpi](https://github.com/Yumi-Lab/kimi-cli-smartpi) — Moonshot Kimi
+  CLI, native Python via uv.
+- [vibe-cli-smartpi](https://github.com/Yumi-Lab/vibe-cli-smartpi) — official Mistral
+  Vibe CLI, native Python via uv.
+
+All four are driven together by the [Yumi AI
+Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway).
 
 ## Licensing
 
