@@ -56,6 +56,10 @@ sudo npm install -g --save-exact "@anthropic-ai/claude-code@${CLAUDE_VER}" --no-
 #    USE_BUILTIN_RIPGREP=0   the package vendors no arm-linux ripgrep → system rg
 #    DISABLE_AUTOUPDATER=1   one auto-update = 64-bit binary = broken install
 mkdir -p ~/.claude
+# A previous run through sudo may have left settings.json root-owned — take it back.
+if [ -e ~/.claude/settings.json ] && [ ! -w ~/.claude/settings.json ]; then
+  sudo chown "$(id -un):$(id -gn)" ~/.claude/settings.json
+fi
 python3 - <<'EOF'
 import json, os
 p = os.path.expanduser('~/.claude/settings.json')
