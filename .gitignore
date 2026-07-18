@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+
+# Locally-built Anthropic bundle — never commit (built on-device by install-latest.sh)
+cli.js
+bundle*.mjs
+claude-*.cli.js
+node_modules/
+*.bin

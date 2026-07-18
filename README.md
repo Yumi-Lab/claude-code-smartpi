@@ -4,10 +4,18 @@ The **official Anthropic Claude Code CLI** running on **Allwinner H3 / armv7l**
 (Smart Pi One, Yumi SmartPad) — a platform the official installer rejects and
 that every doc declares "64-bit only".
 
-It runs **natively** (no emulation): version **2.1.112** is the last npm release
-distributed as pure JavaScript, so it only needs Node ≥ 18. Sign in with a
-**Claude Pro/Max account** (no API key required), full interactive interface,
-full agent mode.
+It runs **natively, no emulation**, in two flavours:
+
+- **Latest** — *any* current version (2.1.2xx…). Since 2.1.113 the official CLI
+  ships as a Bun-compiled binary, but its JavaScript is embedded inside. The
+  installer downloads the official binary, **extracts that JS on your device**,
+  lowers it to Node 20 syntax, and runs it under Debian's own Node with a small
+  Bun→Node shim. No token, no account needed to install.
+- **Pinned** — **2.1.112**, the last npm release distributed as pure JavaScript.
+  The lightest, most battle-tested path; needs only Node ≥ 18.
+
+Sign in with a **Claude Pro/Max account** (no API key required); full interactive
+interface, full agent mode.
 
 ```
 ╭─────────────────────────────────────────────────╮
@@ -16,17 +24,26 @@ full agent mode.
 │   /help for help, /status for your current      │
 │   setup                                         │
 │                                                 │
-│   cwd: /home/pi        2.1.112 · armv7l native  │
+│   cwd: /home/pi        2.1.2xx · armv7l native  │
 ╰─────────────────────────────────────────────────╯
 ```
 
 ## Install
 
+**Latest version** (downloads the official binary, extracts + builds on-device):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install-latest.sh | bash
+```
+
+**Pinned 2.1.112** (lightest, pure-JS npm — no big download):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install.sh | bash
 ```
 
-Then sign in with your Claude Pro/Max account (headless, no local browser needed):
+Both leave the same `claude` command; the last one you run wins. Then sign in
+(headless, no local browser needed):
 
 ```bash
 claude setup-token
@@ -44,7 +61,7 @@ claude-token-save sk-ant-oat01-…
 
 | Command | Purpose |
 |---|---|
-| `claude` | **Full interactive interface** — the real official TUI, running natively (pure JS, no tricks) |
+| `claude` | **Full interactive interface** — the real official TUI, running natively |
 | `claude -p "question"` | One-shot answer (full agent mode: reads/writes files, runs commands) |
 | `claude setup-token` | Sign in with a Claude Pro/Max account (one-time OAuth code, browser on any machine) |
 | `claude-token-save <token>` | Persist the 1-year token (`~/.claude/.oauth_token` + `settings.json`) |
@@ -54,39 +71,55 @@ Every `claude` launch goes through a small wrapper (`taskset … nice -n 5`) tha
 runs it on **all 4 cores at low priority** by default. To free cores for another
 job — or stay cool on a fan-less board — throttle it **without reinstalling**:
 `CLAUDE_CPUS=0,1 claude …` binds it to 2 cores (same knob as `GROK_CPUS` on the
-sister [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)). The
-real entry point stays reachable as `claude-bin`. Any npm operation on the
-package resets the plain symlink — re-run `install.sh` to restore the wrapper.
+sister [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)).
 
-⚠️ **Never update Claude Code beyond 2.1.112 on 32-bit** — every newer version
-is a 64-bit Bun binary. The installer disables auto-update; to repair or
-reinstall, re-run `install.sh`.
+## Updating
+
+- **Latest channel:** re-run `install-latest.sh` — it fetches and builds the
+  newest published version. Pin a specific one with
+  `curl … | bash -s -- 2.1.212`.
+- **Pinned channel:** intentionally frozen. Do **not** run `claude update`
+  (it would fetch a 64-bit binary); auto-update is disabled. Re-run `install.sh`
+  to repair.
 
 ## How it works
 
 1. Up to **2.1.112**, the `@anthropic-ai/claude-code` npm package is **pure
-   JavaScript** (`cli.js`, engines `node>=18`, no architecture check). From
-   **2.1.113** it becomes a 132 KB wrapper that downloads a Bun binary built
-   for x64/arm64 only → dead on 32-bit. We pin 2.1.112 with `--save-exact`.
-2. Two environment variables make it work on armhf: `USE_BUILTIN_RIPGREP=0`
-   (the package vendors no arm-linux ripgrep — the Debian `ripgrep` package is
-   used instead) and `DISABLE_AUTOUPDATER=1` (one auto-update = 64-bit binary =
-   broken install).
-3. Unlike its sister project [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)
-   (which needs QEMU 64-on-32 emulation), Claude Code runs **natively** — which
-   makes it the CLI of choice on the pad for heavy multi-turn agentic tasks.
-   Emulating the modern native binary was tested and is a dead end (details in
-   the methodology).
+   JavaScript** (`cli.js`, engines `node>=18`). From **2.1.113** it is only a
+   thin wrapper that downloads a **Bun-compiled binary** for x64/arm64 → dead on
+   32-bit if you try to run it.
+2. But `bun build --compile` **embeds the readable JS** inside that binary. The
+   *latest* installer downloads the official binary, carves the JS out on-device
+   ([`shim/extract-bun-js.py`](shim/extract-bun-js.py)), and rebuilds a runnable
+   bundle:
+   - **esbuild `--target=node20`** lowers the one modern syntax the bundle uses
+     (`using` declarations) so Debian's Node 20 can parse it — and preserves the
+     resource cleanup, which a naive text replace would leak;
+   - a **~15-function Bun→Node shim** ([`shim/bun-shim.mjs`](shim/bun-shim.mjs))
+     provides the Bun APIs the app calls (`Bun.spawn`, `Bun.file`, `stringWidth`,
+     `YAML`, `semver`, …); the app already degrades gracefully on the Bun-only
+     bits ("running under Node?").
+   - No account or token is involved: the binary is a **public** download, and
+     nothing but our shim/launcher/extractor comes from this repo.
+3. Two environment variables make either flavour work on armhf:
+   `USE_BUILTIN_RIPGREP=0` (no arm-linux ripgrep is vendored — the Debian
+   `ripgrep` package is used) and `DISABLE_AUTOUPDATER=1`.
+4. Unlike its sister project [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)
+   (which needs QEMU 64-on-32 emulation), Claude Code runs **natively** — the CLI
+   of choice on the pad for heavy multi-turn agentic tasks. Emulating the modern
+   binary under QEMU was tested and is a dead end (>10 min per prompt): the
+   extraction path above is what makes recent versions usable.
 
-Full details (npm archaeology, dead ends, auth pitfalls, thermal measurements):
-[docs/METHODOLOGY.md](docs/METHODOLOGY.md)
+Full details (npm archaeology, the extraction/shim method, dead ends, auth
+pitfalls, thermal measurements): [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
 
 ## Target hardware & measured performance
 
 Tested on a Yumi SmartPad (Allwinner H3, 4× Cortex-A7 @ 1.2 GHz, 1 GB RAM,
-Debian 13 trixie armhf). Any armv7l SBC with ≥ 1 GB RAM should work. Measured
-performance: `claude --version` 6.6 s · one-shot answer ~23 s · multi-turn
-agentic sessions stable.
+Debian 13 trixie armhf). Any armv7l SBC with ≥ 1 GB RAM should work. Measured:
+`claude --version` 6–10 s · one-shot answer ~24 s · multi-turn agentic sessions
+stable. The *latest* install downloads ~240 MB (the official binary) and runs
+esbuild once (~30 s on the H3); the built version then behaves like the pinned one.
 
 On 1 GB of RAM with SD-card swap, memory exhaustion freezes the machine before the
 kernel OOM killer reacts — the installer enables **earlyoom**. Rule on the pad: one
@@ -106,6 +139,8 @@ Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway).
 
 ## Licensing
 
-- Scripts in this repo: MIT (Yumi Lab)
-- Claude Code itself is installed from the official npm registry at install
-  time (it is not redistributed here) and remains subject to Anthropic's terms.
+- Scripts, shim and launcher in this repo: MIT (Yumi Lab).
+- Claude Code itself is **not redistributed here**. The pinned install pulls it
+  from the official npm registry; the latest install downloads the official
+  binary from Anthropic and extracts its JS **locally, on your own device**. The
+  resulting bundle stays on that device and remains subject to Anthropic's terms.

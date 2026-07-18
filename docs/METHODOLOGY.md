@@ -4,7 +4,7 @@ How to run a CLI whose official distribution is 64-bit only (x86_64/aarch64
 Bun binaries) on a SoC that can only execute 32-bit code (Allwinner H3,
 Cortex-A7, armv7l). Reference document: every choice below was tested on a
 Yumi SmartPad (quad-core H3 @ 1.2 GHz, 1 GB RAM, Debian 13 trixie armhf)
-on 2026-07-17.
+on 2026-07-17/18 (the extraction + Bun→Node shim path, section 4, on 07-18).
 
 ## 1. The problem
 
@@ -69,11 +69,71 @@ passed to qemu via `-L`):
   runtime under 64-on-32 emulation is hopeless. Emulation of the native Claude
   binary is only good for checking versions (`--version`, `--help`).
 
-Conclusion: **native pure-JS 2.1.112 is THE usable solution on 32-bit** — and
-since it runs natively, it is actually the *most capable* CLI on the pad
-(heavy multi-turn agentic tasks are fine, where emulated CLIs overheat).
+Conclusion on emulation: pinned pure-JS 2.1.112 was the first usable solution on
+32-bit, and running the *native* binary under QEMU is a dead end. But 2.1.112 is
+no longer the ceiling — section 4 shows how to run **any** recent version
+natively by extracting its embedded JS.
 
-## 4. Installed layout
+## 4. Breakthrough: run any recent version by extracting its embedded JS
+
+`bun build --compile` produces a single executable, but it **embeds the readable
+JavaScript** inside it (even with `--bytecode`, JavaScriptCore needs the source
+next to the bytecode). So the modern "64-bit-only" binary still contains a
+runnable JS bundle — we just have to get it out and give it a Node-compatible
+runtime. `install-latest.sh` does this entirely **on-device, with no token and no
+account** (validated on the SmartPad, 2026-07-18):
+
+1. **Download the official binary** from the public release URL
+   (`downloads.claude.ai/claude-code-releases/<ver>/<platform>/claude`, ~240 MB).
+   The platform is irrelevant — the embedded JS is byte-for-byte identical across
+   platforms — we only need the bytes.
+2. **Carve out the JS** ([`shim/extract-bun-js.py`](../shim/extract-bun-js.py)):
+   the bundle sits in a trailer terminated by the `\n---- Bun! ----\n` magic; the
+   script locates it and extracts `cli.js` (~20 MB). Pure stdlib, works on armv7l.
+3. **Lower the one modern syntax** the bundle uses — `using` / `await using`
+   (explicit resource management, Node 24+) — with **esbuild `--target=node20`**.
+   This matters: a naïve `sed using→const` would drop the `Symbol.dispose` calls
+   and leak file descriptors and lock files; esbuild emits the correct
+   `try/finally`. esbuild ships a native `linux-arm` (armv7) build, so it runs on
+   the pad (~30 s for the 20 MB bundle).
+4. **Shim the Bun-only APIs** ([`shim/bun-shim.mjs`](../shim/bun-shim.mjs)). The
+   app calls a small surface — `Bun.spawn`, `Bun.file`, `Bun.hash`,
+   `Bun.stringWidth` / `stripANSI` / `wrapAnsi` (Ink layout), `Bun.YAML`,
+   `Bun.semver`, `Bun.which`, `require("bun:ffi")` — and the truly Bun-only bits
+   (`Bun.Terminal`, `Bun.serve`, `Bun.SQL`) are already **guarded** in the code
+   (it literally checks "running under Node?" and degrades). ~15 functions in the
+   shim cover everything the CLI path touches. A tiny launcher
+   ([`shim/claude.mjs`](../shim/claude.mjs)) installs the shim, then runs the
+   bundle as a CJS factory (it is exported as an ESM default so `import.meta.*`
+   stays legal).
+5. **Run it under Debian's own Node 20.** Because esbuild already lowered the
+   syntax, the system `nodejs` (20.19, straight from apt) parses and runs the
+   bundle — **no Node 22/24 needed**. `claude --version` answers in ~6–10 s, one
+   shot in ~24 s: same ballpark as the pinned 2.1.112.
+
+Runtime modules Bun provides but Node does not (`ws`, `undici`, `js-yaml`) are
+installed with npm and shipped alongside the bundle. The Anthropic JS is built
+**locally on the device** from the user's own download and never redistributed by
+this repo — only our extractor, shim and launcher live here.
+
+Two settings still apply exactly as for the pinned build: `USE_BUILTIN_RIPGREP=0`
+(system `rg`) and `DISABLE_AUTOUPDATER=1` (the installer owns updates — re-run
+`install-latest.sh` to move to a newer version).
+
+## 5. Installed layout
+
+Latest channel (`install-latest.sh`):
+
+```
+/opt/claude-code/lib/claude-code/                        extracted + shimmed bundle
+    cli.js  bundle.mjs  claude.mjs  bun-shim.mjs  node_modules/{ws,undici,js-yaml,argparse}
+    VERSION                                               installed version marker
+/usr/local/bin/claude                                    #!/bin/sh wrapper
+                                                         exec taskset -c ${CLAUDE_CPUS:-0,1,2,3} \
+                                                           nice -n 5 node /opt/claude-code/lib/claude-code/claude.mjs "$@"
+```
+
+Pinned channel (`install.sh`):
 
 ```
 /usr/local/lib/node_modules/@anthropic-ai/claude-code   pinned 2.1.112 (npm -g)
@@ -96,7 +156,7 @@ drops the wrapper — the installer is idempotent (it re-clears a stale wrapper
 before `npm install` and re-wraps after, keying idempotence on the resolved
 `cli.js`, never on `bin/claude`), so re-running `install.sh` restores it.
 
-## 5. Authentication (Claude Pro/Max account, no API key)
+## 6. Authentication (Claude Pro/Max account, no API key)
 
 `claude setup-token` is the official headless flow:
 
@@ -116,7 +176,7 @@ Pitfalls (all hit in real use):
   end the command with `; sleep 99999` — otherwise the pane dies with the
   process and the token is lost.
 
-## 6. Performance and memory (1 GB H3)
+## 7. Performance and memory (1 GB H3)
 
 Measured on the SmartPad (Debian 13 trixie armhf, Node 20.19):
 
@@ -157,11 +217,16 @@ pure-JS Claude is far gentler on the SoC (no thermal runaway observed), so here
 the knob is mostly about **sharing cores**, not survival — but it is wired
 identically for consistency across the CLI family.
 
-## 7. Maintenance
+## 8. Maintenance
 
-- **Never update beyond 2.1.112 on 32-bit.** Auto-update is disabled at three
-  levels (env var, `autoUpdates: false`, `--save-exact`); don't defeat them.
-- To repair or reinstall: re-run `install.sh` (idempotent).
-- If `claude` suddenly breaks, check `npm ls -g @anthropic-ai/claude-code` —
-  anything other than 2.1.112 means something updated it.
+- **Latest channel:** to update, re-run `install-latest.sh` (fetches + builds the
+  newest published version; pin one with `bash -s -- <version>`). Never use
+  `claude update` — it would replace the shimmed bundle with a 64-bit binary;
+  auto-update is disabled.
+- **Pinned channel:** stays on 2.1.112 by design. Auto-update is disabled at three
+  levels (env var, `autoUpdates: false`, `--save-exact`); don't defeat them. If
+  `claude` suddenly breaks, check `npm ls -g @anthropic-ai/claude-code` — anything
+  other than 2.1.112 means something updated it. Re-run `install.sh` to repair.
+- The two channels share the same `/usr/local/bin/claude` name — the last
+  installer you run wins; re-run either to switch back.
 - Token expired (1 year): redo `claude setup-token` + `claude-token-save`.
