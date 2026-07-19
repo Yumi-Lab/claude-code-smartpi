@@ -112,6 +112,10 @@ EOF
 # 5. Token helper: `claude setup-token` prints the 1-year OAuth token ONCE and
 #    does not persist it — this helper saves it properly.
 fetch bin/claude-token-save /usr/local/bin/claude-token-save
+#    Update probe (OTA contract shared by every *-smartpi repo): one JSON line
+#    {installed, latest, update_available}. On this pinned build it will keep
+#    reporting an update — moving to the newest = install-latest.sh.
+fetch bin/claude-check-update /usr/local/bin/claude-check-update
 
 # 6. Anti-freeze safety net: kills the largest process before memory exhaustion
 #    (1 GB of RAM + SD-card swap = full machine freeze otherwise).

@@ -73,14 +73,23 @@ job — or stay cool on a fan-less board — throttle it **without reinstalling*
 `CLAUDE_CPUS=0,1 claude …` binds it to 2 cores (same knob as `GROK_CPUS` on the
 sister [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)).
 
-## Updating
+## Updating (OTA)
 
-- **Latest channel:** re-run `install-latest.sh` — it fetches and builds the
-  newest published version. Pin a specific one with
+- **Check:** `claude-check-update` (installed by both channels) prints one JSON
+  line — `{"cli":"claude","installed":"2.1.212","latest":"2.1.215","update_available":true}`.
+  This is the probe the [Yumi AI Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway)
+  console polls for its update badge.
+- **Latest channel:** re-run `install-latest.sh` — that IS the updater: it exits
+  fast when already newest (`CLAUDE_FORCE=1` to rebuild), otherwise fetches and
+  builds the newest published version. Pin a specific one with
   `curl … | bash -s -- 2.1.212`.
 - **Pinned channel:** intentionally frozen. Do **not** run `claude update`
   (it would fetch a 64-bit binary); auto-update is disabled. Re-run `install.sh`
-  to repair.
+  to repair, or move to `install-latest.sh` for the newest version.
+- **Privileges:** root/sudo for the *first* install only. Updates run as any
+  user that owns `/opt/claude-code` — the gateway service user updates without
+  sudo (the `/usr/local/bin/claude` wrapper is version-independent and is not
+  rewritten on routine updates).
 
 ## How it works
 
