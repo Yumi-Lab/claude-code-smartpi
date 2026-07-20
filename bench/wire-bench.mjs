@@ -1,12 +1,12 @@
 // EXPERIMENTAL bench — base64-in-JSON (current daemon protocol) vs binary framing.
 // Measures, per output volume: bytes on the wire, encode CPU (daemon side),
 // decode CPU (client side), and a real end-to-end pass over a Unix socket with an
-// integrity check. Run:  node bench/experimental/wire-bench.mjs
+// integrity check. Run:  node bench/wire-bench.mjs
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { frame, createDecoder, T_OUT, T_ERR } from '../../shim/wire.mjs';   // the production codec
+import { frame, createDecoder, T_OUT, T_ERR } from '../shim/wire.mjs';   // the production codec
 
 // base64-in-JSON — the OLD protocol, kept here only to benchmark the new one against.
 function b64Encode(type, payload) {

@@ -1,8 +1,8 @@
-# Experimental: binary wire framing vs base64-in-JSON (daemon socket)
+# Binary wire framing vs base64-in-JSON (daemon socket)
 
-Validating replacing the daemon's base64-in-JSON output frames with length-prefixed
-binary frames (`shim` daemon carries agent stdout/stderr; see `wire.mjs`). Bench:
-`node bench/experimental/wire-bench.mjs` (8 KB chunks, integrity-checked).
+The daemon carries agent stdout/stderr over its Unix socket. This compares the old
+base64-in-JSON frames with the length-prefixed binary frames now in production
+(`shim/wire.mjs`). Bench: `node bench/wire-bench.mjs` (8 KB chunks, integrity-checked).
 
 ## Smart Pi One (armv7l, Allwinner H3, Node 22, pinned to 1 core)
 

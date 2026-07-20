@@ -7,7 +7,7 @@
 // a type-1 frame; agent stdout/stderr travel RAW in type-2/3 frames — no base64, so
 // no +33% on the wire and no per-chunk transcode (the H3's CPU is the scarce resource).
 // Daemon and client are deployed together, so there is a single protocol, no fallback.
-// Bench + numbers: bench/experimental/.
+// Bench + numbers: bench/wire-bench.mjs, bench/results/wire-framing.md.
 
 export const T_JSON = 1, T_OUT = 2, T_ERR = 3;
 
