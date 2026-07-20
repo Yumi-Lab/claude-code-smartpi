@@ -146,8 +146,11 @@ mkdir -p "$work/build"
 ) || fail "npm install (esbuild + deps) failed"
 printf 'export default ' > "$work/bundle.raw.mjs"
 cat "$cli" >> "$work/bundle.raw.mjs"
+# CJS (not ESM): the launcher runs the bundle through vm.Script to reuse a persisted V8
+# bytecode cache, and --format=cjs also lowers the `import.meta` the bundle uses (the reason
+# the old ESM wrapper existed). Same node20 target; still lowers `using`.
 "$work/build/node_modules/.bin/esbuild" "$work/bundle.raw.mjs" \
-  --outfile="$work/bundle.mjs" --format=esm --target=node20 --platform=node --log-level=warning \
+  --outfile="$work/bundle.cjs" --format=cjs --target=node20 --platform=node --log-level=warning \
   || fail "esbuild failed"
 
 # 6. Assemble the install tree under $PREFIX/lib/claude-code.
@@ -160,7 +163,7 @@ $RMLIB mkdir -p "$LIB/node_modules"
 [ -w "$LIB" ] || $SUDO chown -R "$(id -un):$(id -gn)" "$PREFIX" 2>/dev/null || true
 S=""; [ -w "$LIB" ] || S="$SUDO"
 $S install -m644 "$cli" "$LIB/cli.js"           # require base / __filename
-$S install -m644 "$work/bundle.mjs" "$LIB/bundle.mjs"
+$S install -m644 "$work/bundle.cjs" "$LIB/bundle.cjs"   # vm.Script-cacheable, import.meta lowered
 for f in shim/claude.mjs shim/bun-shim.mjs; do
   t="$(fetch_tmp "$f")" || fail "cannot fetch $f"
   $S install -m644 "$t" "$LIB/$(basename "$f")"; rm -f "$t"
@@ -170,6 +173,19 @@ for m in ws undici js-yaml argparse; do
 done
 printf '%s\n' "$VER" > "$work/VERSION"
 $S install -m644 "$work/VERSION" "$LIB/VERSION"
+
+# 6b. Prime the V8 bytecode cache so EVERY launch is warm from the first (native behaviour).
+#     The launcher compiles the 26 MB bundle once (~7 s on the H3) and writes
+#     $LIB/bundle.v8cache; subsequent launches skip compilation (--version 8.4 s → 2.9 s on the
+#     Smart Pi One). Built by the installer, which owns $LIB after the chown above → shared,
+#     mode 644, all users read it. A missing/rejected cache (Node upgrade, or a per-user
+#     read-only $LIB) is rebuilt automatically by the launcher, keyed on VERSION + running V8.
+log "Priming V8 bytecode cache (one-time compile)…"
+if node "$LIB/claude.mjs" --version >/dev/null 2>&1 && [ -f "$LIB/bundle.v8cache" ]; then
+  log "cache primed ($(du -h "$LIB/bundle.v8cache" 2>/dev/null | cut -f1 | tr -d ' '))"
+else
+  warn "cache not primed now — the first launch builds it (still works, just slower once)."
+fi
 
 # 7. Launcher wrapper — same CLAUDE_CPUS knob as the pinned build (all 4 cores
 #    by default; CLAUDE_CPUS=0,1 to free cores, no reinstall). Uses system Node.

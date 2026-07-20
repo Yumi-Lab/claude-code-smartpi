@@ -5,6 +5,8 @@ __pycache__/
 cli.js
 bundle*.mjs
 bundle*.cjs
+bundle.v8cache
+*.v8cache
 claude-*.cli.js
 node_modules/
 *.bin

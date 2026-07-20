@@ -126,7 +126,8 @@ Latest channel (`install-latest.sh`):
 
 ```
 /opt/claude-code/lib/claude-code/                        extracted + shimmed bundle
-    cli.js  bundle.mjs  claude.mjs  bun-shim.mjs  node_modules/{ws,undici,js-yaml,argparse}
+    cli.js  bundle.cjs  claude.mjs  bun-shim.mjs  node_modules/{ws,undici,js-yaml,argparse}
+    bundle.v8cache                                        V8 bytecode cache (primed at install)
     VERSION                                               installed version marker
 /usr/local/bin/claude                                    #!/bin/sh wrapper
                                                          exec taskset -c ${CLAUDE_CPUS:-0,1,2,3} \
@@ -180,11 +181,30 @@ Pitfalls (all hit in real use):
 
 Measured on the SmartPad (Debian 13 trixie armhf, Node 20.19):
 
-- `claude --version`: 6.6 s (Node cold start of a large bundle)
+- `claude --version`: ~8.4 s uncached → **2.9 s with the V8 bytecode cache** (below)
 - `claude -p "simple question"`: ~23 s end-to-end
 - Multi-turn agentic sessions: stable, no thermal runaway (native JS does not
   saturate the SoC the way emulation does — the same pad hit 102 °C and froze
   under a 4-core emulated agentic task).
+
+### V8 bytecode cache (warm start, since the latest channel)
+
+Most of that cold start is V8 parsing+compiling the 26 MB bundle — ~6.8 s of the
+~8.4 s `--version` on the H3 (measured, see [`bench/`](../bench/)). The launcher
+([`shim/claude.mjs`](../shim/claude.mjs)) loads the bundle through `vm.Script` with a
+persisted bytecode cache (`produceCachedData`/`cachedData`): the first launch compiles
+once and writes `$LIB/bundle.v8cache`; every launch after skips compilation.
+`install-latest.sh` **primes** that cache at install time, so the very first real
+launch is already warm — no user action.
+
+Measured on the Smart Pi One: `claude --version` **8.4 s → 2.9 s** (compile phase
+6.8 s → ~0 ms), peak RSS 158 → 115 MB. The cache is keyed on VERSION (a whole new
+`$LIB` on update) and on the running V8 (`cachedDataRejected` after a Node upgrade), so
+it rebuilds itself automatically — no stale-cache risk. This is why the bundle is now
+`bundle.cjs` (esbuild `--format=cjs`, which also lowers `import.meta`) instead of the
+earlier ESM `bundle.mjs` + `await import()` path. Full comparison — including why a
+Go/`goja` rewrite is a dead end (`goja` cannot even parse the bundle's dynamic
+`import()`) — lives in [`bench/`](../bench/).
 
 On 1 GB of RAM with SD-card swap, memory exhaustion freezes the machine before
 the kernel OOM killer reacts — the installer enables **earlyoom**. Operating

@@ -101,13 +101,19 @@ sister [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi)).
    *latest* installer downloads the official binary, carves the JS out on-device
    ([`shim/extract-bun-js.py`](shim/extract-bun-js.py)), and rebuilds a runnable
    bundle:
-   - **esbuild `--target=node20`** lowers the one modern syntax the bundle uses
-     (`using` declarations) so Debian's Node 20 can parse it — and preserves the
-     resource cleanup, which a naive text replace would leak;
+   - **esbuild `--format=cjs --target=node20`** lowers the one modern syntax the
+     bundle uses (`using` declarations) so Debian's Node 20 can parse it — preserving
+     the resource cleanup a naive text replace would leak — and emits CJS so the
+     launcher can cache it (next bullet) and `import.meta` is lowered too;
    - a **~15-function Bun→Node shim** ([`shim/bun-shim.mjs`](shim/bun-shim.mjs))
      provides the Bun APIs the app calls (`Bun.spawn`, `Bun.file`, `stringWidth`,
      `YAML`, `semver`, …); the app already degrades gracefully on the Bun-only
-     bits ("running under Node?").
+     bits ("running under Node?");
+   - a **V8 bytecode cache** ([`shim/claude.mjs`](shim/claude.mjs) via `vm.Script`)
+     is primed at install, so the 26 MB bundle is compiled once, not on every launch:
+     `claude --version` **8.4 s → 2.9 s** on the H3. It rebuilds itself on update or a
+     Node upgrade. Why not a Go rewrite? See [`bench/`](bench/) — `goja` can't even
+     parse the bundle.
    - No account or token is involved: the binary is a **public** download, and
      nothing but our shim/launcher/extractor comes from this repo.
 3. Two environment variables make either flavour work on armhf:
@@ -126,9 +132,10 @@ pitfalls, thermal measurements): [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
 
 Tested on a Yumi SmartPad (Allwinner H3, 4× Cortex-A7 @ 1.2 GHz, 1 GB RAM,
 Debian 13 trixie armhf). Any armv7l SBC with ≥ 1 GB RAM should work. Measured:
-`claude --version` 6–10 s · one-shot answer ~24 s · multi-turn agentic sessions
-stable. The *latest* install downloads ~240 MB (the official binary) and runs
-esbuild once (~30 s on the H3); the built version then behaves like the pinned one.
+`claude --version` **2.9 s** (with the V8 bytecode cache; ~8.4 s uncached) · one-shot
+answer ~24 s · multi-turn agentic sessions stable. The *latest* install downloads
+~240 MB (the official binary), runs esbuild once (~30 s on the H3) and primes the
+bytecode cache (~7 s); the built version then behaves like the pinned one.
 
 On 1 GB of RAM with SD-card swap, memory exhaustion freezes the machine before the
 kernel OOM killer reacts — the installer enables **earlyoom**. Rule on the pad: one
