@@ -39,10 +39,6 @@ Pin a specific version instead of the newest:
 curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install.sh | bash -s -- 2.1.212
 ```
 
-> There is a single installer. `install-latest.sh` still exists but is only a
-> deprecated alias that forwards to `install.sh` (kept so the OTA and old
-> one-liners keep working).
-
 Then sign in (headless, no local browser needed):
 
 ```bash

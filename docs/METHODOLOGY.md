@@ -80,7 +80,7 @@ natively by extracting its embedded JS.
 JavaScript** inside it (even with `--bytecode`, JavaScriptCore needs the source
 next to the bytecode). So the modern "64-bit-only" binary still contains a
 runnable JS bundle — we just have to get it out and give it a Node-compatible
-runtime. `install-latest.sh` does this entirely **on-device, with no token and no
+runtime. `install.sh` does this entirely **on-device, with no token and no
 account** (validated on the SmartPad, 2026-07-18):
 
 1. **Download the official binary** from the public release URL
@@ -118,11 +118,11 @@ this repo — only our extractor, shim and launcher live here.
 
 Two settings still apply exactly as for the pinned build: `USE_BUILTIN_RIPGREP=0`
 (system `rg`) and `DISABLE_AUTOUPDATER=1` (the installer owns updates — re-run
-`install-latest.sh` to move to a newer version).
+`install.sh` to move to a newer version).
 
 ## 5. Installed layout
 
-Latest channel (`install-latest.sh`):
+Latest channel (`install.sh`):
 
 ```
 /opt/claude-code/lib/claude-code/                        extracted + shimmed bundle
@@ -194,7 +194,7 @@ Most of that cold start is V8 parsing+compiling the 26 MB bundle — ~6.8 s of t
 ([`shim/claude.mjs`](../shim/claude.mjs)) loads the bundle through `vm.Script` with a
 persisted bytecode cache (`produceCachedData`/`cachedData`): the first launch compiles
 once and writes `$LIB/bundle.v8cache`; every launch after skips compilation.
-`install-latest.sh` **primes** that cache at install time, so the very first real
+`install.sh` **primes** that cache at install time, so the very first real
 launch is already warm — no user action.
 
 Measured on the Smart Pi One: `claude --version` **8.4 s → 2.9 s** (compile phase
@@ -239,10 +239,10 @@ identically for consistency across the CLI family.
 
 ## 8. Maintenance
 
-- **Single installer:** there is now one system — `install.sh` installs the newest
+- **Single installer:** there is one system — `install.sh` installs the newest
   Claude Code at run time and is also the updater. Re-run it to update (pin a version
-  with `bash -s -- <version>`). `install-latest.sh` is kept only as a deprecated alias
-  forwarding to `install.sh` (so the OTA and old one-liners keep working).
+  with `bash -s -- <version>`). This is the same convention as the sister CLIs
+  (grok/kimi/vibe-cli-smartpi), and the Yumi AI Gateway OTA calls it directly.
 - Never use `claude update` — it would replace the shimmed bundle with a 64-bit
   binary; auto-update is disabled (env var + `autoUpdates: false`).
 - The `/usr/local/bin/claude` wrapper is version-independent — routine updates only
