@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { frame, frameJSON, createDecoder, T_JSON, T_OUT, T_ERR } from './wire.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCHER  = path.join(__dirname, 'claude.mjs');          // the in-process launcher we supervise
@@ -68,8 +69,8 @@ function startJob(job) {
   send({ type: 'started', running, max: MAX });
   if (req.stdin) { child.stdin.write(req.stdin); }
   child.stdin.end();
-  child.stdout.on('data', (d) => send({ type: 'out', data: d.toString('base64'), enc: 'b64' }));
-  child.stderr.on('data', (d) => send({ type: 'err', data: d.toString('base64'), enc: 'b64' }));
+  child.stdout.on('data', (d) => { try { sock.write(frame(T_OUT, d)); } catch {} });   // raw, no base64
+  child.stderr.on('data', (d) => { try { sock.write(frame(T_ERR, d)); } catch {} });
   child.on('close', (code) => {
     send({ type: 'exit', code: code ?? 0 });
     try { sock.end(); } catch {}
@@ -84,23 +85,19 @@ function pump() { while (running < MAX && queue.length) startJob(queue.shift());
 
 function onConn(sock) {
   clearTimeout(idleTimer);
-  let buf = '';
-  const send = (msg) => { try { sock.write(JSON.stringify(msg) + '\n'); } catch {} };
-  sock.on('data', (chunk) => {
-    buf += chunk; let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-      if (!line.trim()) continue;
-      let req; try { req = JSON.parse(line); } catch { continue; }
-      if (req.cmd === 'ping')   { send({ type: 'pong', running, max: MAX, queued: queue.length }); continue; }
-      if (req.cmd === 'status') { send({ type: 'status', running, max: MAX, queued: queue.length }); sock.end(); continue; }
-      if (req.cmd === 'run') {
-        const job = { req, sock, send };
-        if (running < MAX) startJob(job);
-        else { queue.push(job); send({ type: 'queued', position: queue.length, running, max: MAX }); }
-      }
+  const send = (msg) => { try { sock.write(frameJSON(msg)); } catch {} };
+  const decode = createDecoder((type, payload) => {
+    if (type !== T_JSON) return;                              // the client only sends control frames
+    let req; try { req = JSON.parse(payload.toString('utf8')); } catch { return; }
+    if (req.cmd === 'ping')   { send({ type: 'pong', running, max: MAX, queued: queue.length }); return; }
+    if (req.cmd === 'status') { send({ type: 'status', running, max: MAX, queued: queue.length }); sock.end(); return; }
+    if (req.cmd === 'run') {
+      const job = { req, sock, send };
+      if (running < MAX) startJob(job);
+      else { queue.push(job); send({ type: 'queued', position: queue.length, running, max: MAX }); }
     }
   });
+  sock.on('data', decode);
   sock.on('error', () => {});
 }
 

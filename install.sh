@@ -181,7 +181,7 @@ $RMLIB mkdir -p "$LIB/node_modules"
 S=""; [ -w "$LIB" ] || S="$SUDO"
 $S install -m644 "$cli" "$LIB/cli.js"           # require base / __filename
 $S install -m644 "$work/bundle.cjs" "$LIB/bundle.cjs"   # vm.Script-cacheable, import.meta lowered
-for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs; do
+for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs shim/wire.mjs; do
   t="$(fetch_tmp "$f")" || fail "cannot fetch $f"
   $S install -m644 "$t" "$LIB/$(basename "$f")"; rm -f "$t"
 done

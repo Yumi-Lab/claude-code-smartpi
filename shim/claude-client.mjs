@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { frameJSON, createDecoder, T_JSON, T_OUT, T_ERR } from './wire.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.join(__dirname, 'claude-daemon.mjs');
@@ -44,23 +45,17 @@ async function readStdin() {
 
 const stdinData = await readStdin();
 const sock = await getConn();
-const send = (m) => sock.write(JSON.stringify(m) + '\n');
-send({ cmd: 'run', args: process.argv.slice(2), cwd: process.cwd(), stdin: stdinData || undefined });
+sock.write(frameJSON({ cmd: 'run', args: process.argv.slice(2), cwd: process.cwd(), stdin: stdinData || undefined }));
 
-let buf = '';
-sock.on('data', (chunk) => {
-  buf += chunk; let nl;
-  while ((nl = buf.indexOf('\n')) >= 0) {
-    const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-    if (!line.trim()) continue;
-    let m; try { m = JSON.parse(line); } catch { continue; }
-    const decode = (x) => (m.enc === 'b64' ? Buffer.from(x, 'base64') : Buffer.from(String(x)));
-    if (m.type === 'out') process.stdout.write(decode(m.data));
-    else if (m.type === 'err') process.stderr.write(decode(m.data));
-    else if (m.type === 'queued' && process.env.CLAUDE_DAEMON_DEBUG)
-      process.stderr.write(`[queued #${m.position}, ${m.running}/${m.max} running]\n`);
-    else if (m.type === 'exit') process.exitCode = m.code || 0;
-  }
+const decode = createDecoder((type, payload) => {
+  if (type === T_OUT) { process.stdout.write(payload); return; }        // raw bytes straight through
+  if (type === T_ERR) { process.stderr.write(payload); return; }
+  if (type !== T_JSON) return;
+  let m; try { m = JSON.parse(payload.toString('utf8')); } catch { return; }
+  if (m.type === 'exit') process.exitCode = m.code || 0;
+  else if (m.type === 'queued' && process.env.CLAUDE_DAEMON_DEBUG)
+    process.stderr.write(`[queued #${m.position}, ${m.running}/${m.max} running]\n`);
 });
+sock.on('data', decode);
 sock.on('close', () => process.exit(process.exitCode || 0));
 sock.on('error', (e) => { process.stderr.write(`claude daemon error: ${e.message}\n`); process.exit(1); });

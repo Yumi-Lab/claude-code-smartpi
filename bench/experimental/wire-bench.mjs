@@ -6,9 +6,26 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import {
-  frame, createDecoder, b64Encode, createB64Decoder, T_OUT,
-} from './wire.mjs';
+import { frame, createDecoder, T_OUT, T_ERR } from '../../shim/wire.mjs';   // the production codec
+
+// base64-in-JSON — the OLD protocol, kept here only to benchmark the new one against.
+function b64Encode(type, payload) {
+  const t = type === T_OUT ? 'out' : type === T_ERR ? 'err' : 'ctl';
+  return Buffer.from(JSON.stringify({ type: t, data: payload.toString('base64'), enc: 'b64' }) + '\n');
+}
+function createB64Decoder(onMsg) {
+  let s = '';
+  return (chunk) => {
+    s += chunk.toString('binary');
+    let nl;
+    while ((nl = s.indexOf('\n')) >= 0) {
+      const line = s.slice(0, nl); s = s.slice(nl + 1);
+      if (!line.trim()) continue;
+      const m = JSON.parse(line);
+      onMsg(m.type, Buffer.from(m.data, 'base64'));
+    }
+  };
+}
 
 const CHUNK = 8192;                                   // a typical stdout 'data' chunk
 const SIZES = [64 * 1024, 512 * 1024, 4 * 1024 * 1024];

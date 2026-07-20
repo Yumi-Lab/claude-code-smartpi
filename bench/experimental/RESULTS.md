@@ -35,8 +35,8 @@ downside beyond a slightly less human-readable stream. The absolute per-job savi
 small for typical KB-scale answers, but real for verbose agents / large tool outputs
 (multi-MB file reads, logs) where base64 transcode costs the H3 hundreds of ms.
 
-**Status: experimental, validated — not yet wired into the production daemon.** To
-promote: swap the daemon's `send`/output path and the client's decoder to `wire.mjs`
-(negotiated per connection via a `wire:'bin'` flag on the run request, so old clients
-keep the base64 path). Production `shim/claude-daemon.mjs` + `claude-client.mjs`
-remain on base64 until then.
+**Status: PROMOTED to production.** The codec now lives at `shim/wire.mjs`; the daemon
+and client use it as the single protocol (no base64, no fallback — they deploy
+together, so there are no old clients). Validated end-to-end on the pad: real agent
+jobs through the daemon return byte-exact output. This bench keeps the base64 codec
+inline only to compare against the production `shim/wire.mjs`.
