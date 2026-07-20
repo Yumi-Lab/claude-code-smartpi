@@ -38,6 +38,7 @@ REL="https://downloads.claude.ai/claude-code-releases"
 DL_PLATFORM="${CLAUDE_DL_PLATFORM:-linux-arm64-musl}"
 PREFIX="${CLAUDE_PREFIX:-/opt/claude-code}"       # install root (payload)
 BINDIR="${CLAUDE_BINDIR:-/usr/local/bin}"
+DL_CACHE="${CLAUDE_DL_CACHE:-/var/tmp/claude-code-cache}"   # persistent download cache (resume across runs)
 VER="${1:-${CLAUDE_VERSION:-latest}}"
 
 log()  { printf '\033[1;36m[claude-smartpi]\033[0m %s\n' "$*"; }
@@ -91,6 +92,21 @@ put_if_changed() { # $1 dest, $2 src, $3 mode
   rm -f "$2"; return $rc
 }
 
+# Download $1 → $2 with cache + resume. Skips the download when the cached file already
+# matches the server's Content-Length; otherwise `curl -C -` continues a partial file —
+# on the pads' flaky WiFi a dropped 240 MB download resumes instead of restarting.
+fetch_resumable() { # $1 url, $2 dest
+  local url="$1" dest="$2" remote
+  mkdir -p "$(dirname "$dest")" 2>/dev/null || true
+  remote="$(curl -fsSLI "$url" 2>/dev/null | awk 'tolower($1)=="content-length:"{v=$2} END{gsub(/\r/,"",v); print v+0}')"
+  if [ -n "$remote" ] && [ "$remote" -gt 0 ] && [ -f "$dest" ] \
+     && [ "$(stat -c%s "$dest" 2>/dev/null || echo 0)" = "$remote" ]; then
+    log "cached: $(basename "$dest") ($((remote/1048576)) MB) — skipping download"
+    return 0
+  fi
+  curl -fSL -C - --progress-bar -o "$dest" "$url"
+}
+
 # 1. Toolchain. Claude Code 2.1.212+ HARD-REQUIRES Node at runtime satisfying
 #    ">=22.17.0 <23.0.0 || >=24.2.0" (guard in cli.js AND bundle.mjs; `--version`
 #    still runs on Node 20, real agents do not). Debian only ships Node 20, and there
@@ -109,15 +125,15 @@ if node_ok; then
 else
   cur="$(node --version 2>/dev/null || echo none)"
   log "Installing Node $NODE_VERSION (armv7l, nodejs.org) — Claude Code needs >= 22.17 (have: $cur)…"
-  ndir="$(mktemp -d -p /var/tmp claude-node.XXXXXX)"
   tb="node-$NODE_VERSION-linux-armv7l.tar.xz"
-  curl -fSL --progress-bar -o "$ndir/$tb" "https://nodejs.org/dist/$NODE_VERSION/$tb" \
+  find "$DL_CACHE" -name 'node-*-linux-armv7l.tar.xz' ! -name "$tb" -delete 2>/dev/null || true
+  fetch_resumable "https://nodejs.org/dist/$NODE_VERSION/$tb" "$DL_CACHE/$tb" \
     || fail "Node $NODE_VERSION armv7l download failed (https://nodejs.org/dist/$NODE_VERSION/$tb)"
-  $SUDO tar -xJf "$ndir/$tb" -C /usr/local --strip-components=1 \
+  $SUDO tar -xJf "$DL_CACHE/$tb" -C /usr/local --strip-components=1 \
     "node-$NODE_VERSION-linux-armv7l/bin" "node-$NODE_VERSION-linux-armv7l/include" \
     "node-$NODE_VERSION-linux-armv7l/lib" "node-$NODE_VERSION-linux-armv7l/share" \
     || fail "Node extract to /usr/local failed"
-  rm -rf "$ndir"; hash -r 2>/dev/null || true
+  hash -r 2>/dev/null || true
   node_ok || fail "Node $NODE_VERSION installed but the guard is still unmet (found: $(node --version 2>/dev/null); check PATH order of /usr/local/bin)."
   log "Node now: $(node --version) / npm $(npm --version 2>/dev/null)."
 fi
@@ -140,14 +156,16 @@ log "Target version: $VER (installed: ${CURRENT:-none})"
 work="$(mktemp -d -p /var/tmp claude-smartpi.XXXXXX)"; trap 'rm -rf "$work"' EXIT
 
 # 3. Download the OFFICIAL binary (public, no token; ~240 MB — grab a coffee).
-log "Downloading the official Claude Code binary ($DL_PLATFORM, ~240 MB)…"
-curl -fSL --progress-bar -o "$work/claude.bin" "$REL/$VER/$DL_PLATFORM/claude" \
+log "Downloading the official Claude Code binary ($DL_PLATFORM, ~240 MB; resumes if interrupted)…"
+binf="$DL_CACHE/claude-$VER-$(printf '%s' "$DL_PLATFORM" | tr / -).bin"
+find "$DL_CACHE" -name 'claude-*.bin' ! -name "$(basename "$binf")" -delete 2>/dev/null || true
+fetch_resumable "$REL/$VER/$DL_PLATFORM/claude" "$binf" \
   || fail "download failed ($REL/$VER/$DL_PLATFORM/claude)"
 
 # 4. Carve out the JavaScript on-device.
 log "Extracting the JavaScript bundle…"
 ex="$(fetch_tmp shim/extract-bun-js.py)" || fail "cannot fetch shim/extract-bun-js.py"
-python3 "$ex" "$work/claude.bin" -o "$work/extracted" --label "$VER" >/dev/null \
+python3 "$ex" "$binf" -o "$work/extracted" --label "$VER" >/dev/null \
   || fail "JS extraction failed"
 rm -f "$ex"
 cli="$work/extracted/claude-${VER}.cli.js"
