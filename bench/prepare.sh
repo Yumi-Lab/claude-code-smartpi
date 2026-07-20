@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # prepare.sh — build the lowered bundles the benchmark variants consume, from the
-# raw extracted cli.js (bench/input/cli.js). Mirrors install-latest.sh steps 5-6.
+# raw extracted cli.js (bench/input/cli.js). Mirrors install.sh steps 5-6.
 #
 # Emits into bench/build/:
 #   bundle.node20.mjs  ESM  target=node20  → Variant 1 (Node baseline, shipping path)

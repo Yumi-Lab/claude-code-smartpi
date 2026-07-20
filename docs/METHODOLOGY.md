@@ -239,14 +239,14 @@ identically for consistency across the CLI family.
 
 ## 8. Maintenance
 
-- **Latest channel:** to update, re-run `install-latest.sh` (fetches + builds the
-  newest published version; pin one with `bash -s -- <version>`). Never use
-  `claude update` — it would replace the shimmed bundle with a 64-bit binary;
-  auto-update is disabled.
-- **Pinned channel:** stays on 2.1.112 by design. Auto-update is disabled at three
-  levels (env var, `autoUpdates: false`, `--save-exact`); don't defeat them. If
-  `claude` suddenly breaks, check `npm ls -g @anthropic-ai/claude-code` — anything
-  other than 2.1.112 means something updated it. Re-run `install.sh` to repair.
-- The two channels share the same `/usr/local/bin/claude` name — the last
-  installer you run wins; re-run either to switch back.
+- **Single installer:** there is now one system — `install.sh` installs the newest
+  Claude Code at run time and is also the updater. Re-run it to update (pin a version
+  with `bash -s -- <version>`). `install-latest.sh` is kept only as a deprecated alias
+  forwarding to `install.sh` (so the OTA and old one-liners keep working).
+- Never use `claude update` — it would replace the shimmed bundle with a 64-bit
+  binary; auto-update is disabled (env var + `autoUpdates: false`).
+- The `/usr/local/bin/claude` wrapper is version-independent — routine updates only
+  swap the payload under `/opt/claude-code`, so unprivileged (gateway) updates never
+  touch it. The pinned pure-JS 2.1.112 path described above is historical (kept in git
+  history); the extract + Node 22 build is the one system going forward.
 - Token expired (1 year): redo `claude setup-token` + `claude-token-save`.
