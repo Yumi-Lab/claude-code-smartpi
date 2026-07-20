@@ -164,7 +164,7 @@ $RMLIB mkdir -p "$LIB/node_modules"
 S=""; [ -w "$LIB" ] || S="$SUDO"
 $S install -m644 "$cli" "$LIB/cli.js"           # require base / __filename
 $S install -m644 "$work/bundle.cjs" "$LIB/bundle.cjs"   # vm.Script-cacheable, import.meta lowered
-for f in shim/claude.mjs shim/bun-shim.mjs; do
+for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs; do
   t="$(fetch_tmp "$f")" || fail "cannot fetch $f"
   $S install -m644 "$t" "$LIB/$(basename "$f")"; rm -f "$t"
 done
@@ -198,6 +198,20 @@ cat > "$wrap" <<EOF
 # Claude Code (extracted JS + Bun→Node shim) on armv7l — managed by
 # claude-code-smartpi/install-latest.sh. Version: see $LIB/VERSION.
 # Re-run install-latest.sh (or the gateway console update button) to update.
+#
+# CLAUDE_DAEMON=1 routes HEADLESS runs (-p/--print or piped stdin) through a
+# bounded-concurrency job daemon: a 1 GB board can queue many agent jobs while
+# only CLAUDE_MAX_CONCURRENT (default 3) hold a live runtime at once — the rest
+# wait at ~0 RAM. Measured on the Smart Pi One: one runtime ~137 MB; 3 real
+# agents concurrent leave ~190 MB free, 5 start swapping. The daemon lazy-starts
+# on first job and self-exits after CLAUDE_IDLE_MS idle (no boot service).
+# Interactive claude (full TUI) always stays a direct process — one TTY, one
+# runtime. Unset/0 = direct, unchanged.
+if [ "\${CLAUDE_DAEMON:-0}" = "1" ]; then
+  headless=0; [ -t 0 ] || headless=1
+  for a in "\$@"; do case "\$a" in -p|--print) headless=1;; esac; done
+  [ "\$headless" = "1" ] && exec node "$LIB/claude-client.mjs" "\$@"
+fi
 exec taskset -c "\${CLAUDE_CPUS:-0,1,2,3}" nice -n 5 node "$LIB/claude.mjs" "\$@"
 EOF
 if [ -L "$BINDIR/claude" ]; then $SUDO rm -f "$BINDIR/claude" || true; fi
@@ -265,6 +279,8 @@ Usage:
     claude                    full interactive interface
     claude -p "question"      one-shot answer
     CLAUDE_CPUS=0,1 claude …  throttle to 2 cores (no reinstall)
+    CLAUDE_DAEMON=1 claude -p …   batch: queue many headless jobs, run only
+                                  CLAUDE_MAX_CONCURRENT (default 3) at a time
 
 Update later:  re-run install-latest.sh (fetches and builds the newest version).
 Check first:   claude-check-update   →  {"installed":…,"latest":…,"update_available":…}
