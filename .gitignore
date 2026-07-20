@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 
-# Locally-built Anthropic bundle — never commit (built on-device by install-latest.sh)
+# Locally-built Anthropic bundle — never commit (built on-device by install.sh)
 cli.js
 bundle*.mjs
 bundle*.cjs
