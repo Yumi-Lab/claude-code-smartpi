@@ -10,10 +10,10 @@
 #   But the readable JS is embedded in that binary. This installer:
 #     1. downloads the OFFICIAL binary from Anthropic (public URL, no account),
 #     2. carves out its JavaScript on-device (shim/extract-bun-js.py),
-#     3. lowers the `using` syntax to Node 20 (esbuild --target=node20),
-#     4. runs it under Debian's own Node 20 with a small Bun→Node shim
-#        (shim/bun-shim.mjs — ~15 APIs; the app already degrades gracefully
-#        on the Bun-only bits, "running under Node?").
+#     3. lowers the `using` syntax for broad compatibility (esbuild --target=node20),
+#     4. runs it under Node 22 (installed from nodejs.org — 2.1.212+ hard-requires
+#        >=22.17.0) with a small Bun→Node shim (shim/bun-shim.mjs — ~15 APIs; the
+#        app already degrades gracefully on the Bun-only bits, "running under Node?").
 #   Nothing but our shim/launcher/extractor is fetched from this repo; the
 #   Anthropic bundle is built locally and never redistributed.
 #
@@ -92,18 +92,36 @@ put_if_changed() { # $1 dest, $2 src, $3 mode
   rm -f "$2"; return $rc
 }
 
-# 1. Toolchain: Debian ships Node 20 (which RUNS the esbuild-lowered bundle),
-#    npm (to build esbuild + runtime deps), ripgrep (the app shells out to rg).
-#    Already present (any re-run / OTA update) → no apt, no sudo needed.
-if command -v node >/dev/null && command -v npm >/dev/null && command -v rg >/dev/null; then
-  log "Toolchain already present (node $(node --version 2>/dev/null))."
+# 1. Toolchain. Claude Code 2.1.212+ HARD-REQUIRES Node at runtime satisfying
+#    ">=22.17.0 <23.0.0 || >=24.2.0" (guard in cli.js AND bundle.mjs; `--version`
+#    still runs on Node 20, real agents do not). Debian only ships Node 20, and there
+#    is NO official Node 24 armv7l build — so the one viable target is Node 22 armv7l
+#    from nodejs.org. Its bundled npm builds esbuild + the runtime deps; ripgrep (the
+#    app shells out to rg) still comes from apt. Node is installed into /usr/local so
+#    `node`/`npm` resolve ahead of any Debian /usr/bin copy (no need to purge apt's).
+NODE_VERSION="${CLAUDE_NODE_VERSION:-v22.22.0}"    # pinned armv7l build satisfying the guard
+command -v rg >/dev/null || { log "Installing ripgrep…"; $SUDO apt-get update -qq; $SUDO apt-get install -y -qq ripgrep >/dev/null; }
+
+node_ok() {   # does the resolved `node` satisfy Claude Code's engine guard?
+  node -e 'const[a,b]=process.versions.node.split(".").map(Number);process.exit(((a===22&&b>=17)||(a>=24&&(a>24||b>=2)))?0:1)' 2>/dev/null
+}
+if node_ok; then
+  log "Node $(node --version) already satisfies the >= 22.17 requirement."
 else
-  log "Installing nodejs / npm / ripgrep…"
-  $SUDO apt-get update -qq
-  $SUDO apt-get install -y -qq nodejs npm ripgrep >/dev/null
+  cur="$(node --version 2>/dev/null || echo none)"
+  log "Installing Node $NODE_VERSION (armv7l, nodejs.org) — Claude Code needs >= 22.17 (have: $cur)…"
+  ndir="$(mktemp -d -p /var/tmp claude-node.XXXXXX)"
+  tb="node-$NODE_VERSION-linux-armv7l.tar.xz"
+  curl -fSL --progress-bar -o "$ndir/$tb" "https://nodejs.org/dist/$NODE_VERSION/$tb" \
+    || fail "Node $NODE_VERSION armv7l download failed (https://nodejs.org/dist/$NODE_VERSION/$tb)"
+  $SUDO tar -xJf "$ndir/$tb" -C /usr/local --strip-components=1 \
+    "node-$NODE_VERSION-linux-armv7l/bin" "node-$NODE_VERSION-linux-armv7l/include" \
+    "node-$NODE_VERSION-linux-armv7l/lib" "node-$NODE_VERSION-linux-armv7l/share" \
+    || fail "Node extract to /usr/local failed"
+  rm -rf "$ndir"; hash -r 2>/dev/null || true
+  node_ok || fail "Node $NODE_VERSION installed but the guard is still unmet (found: $(node --version 2>/dev/null); check PATH order of /usr/local/bin)."
+  log "Node now: $(node --version) / npm $(npm --version 2>/dev/null)."
 fi
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-[ "$NODE_MAJOR" -ge 20 ] || fail "needs Node >= 20 (found: $(node --version 2>/dev/null || echo none)); Debian 13 trixie armhf ships 20.x."
 
 # 2. Resolve the target version, and stop right here when already on it.
 if [ "$VER" = "latest" ]; then
@@ -269,7 +287,7 @@ log "Check: $(timeout 40 claude --version 2>/dev/null || echo 'claude --version 
 
 cat <<MSG
 
-✔ Claude Code $VER installed (extracted JS, runs on Debian's Node 20, no token).
+✔ Claude Code $VER installed (extracted JS, runs on Node $(node --version 2>/dev/null || echo 22.x), no token).
 
 Sign in with a Claude Pro/Max account (no API key, no local browser):
     claude setup-token
