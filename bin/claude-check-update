@@ -5,9 +5,9 @@
 # Contract shared by every Yumi-Lab/*-smartpi repo (<cli>-check-update): no sudo,
 # no side effects, fast; "latest"/"installed" are null when unknown (offline,
 # not installed). The Yumi AI Gateway polls this to light its update badge, then
-# runs install-latest.sh to actually update.
+# runs install.sh (unified installer/updater) to actually update.
 #
-# Installed source of truth: the VERSION file written by install-latest.sh.
+# Installed source of truth: the VERSION file written by install.sh.
 # Fallback (pinned npm install, or foreign install): `claude --version`, slow on
 # the H3 (~6 s) hence the generous timeout.
 
