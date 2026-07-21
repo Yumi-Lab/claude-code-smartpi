@@ -276,7 +276,7 @@ print('~/.claude/settings.json pinned:', ', '.join(sorted(env)))
 EOF
 
 # 9. Helpers: token save + update probe (the OTA contract's JSON one-liner).
-for h in bin/claude-token-save bin/claude-check-update; do
+for h in bin/claude-token-save bin/claude-check-update bin/claude-daemon-status; do
   t="$(fetch_tmp "$h")" || { warn "cannot fetch $h (non-fatal)"; continue; }
   put_if_changed "$BINDIR/$(basename "$h")" "$t" 755 \
     || warn "cannot write $BINDIR/$(basename "$h") (no privileges) — existing copy kept."

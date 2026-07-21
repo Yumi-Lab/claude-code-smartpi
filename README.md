@@ -59,6 +59,7 @@ The everyday command is just **`claude`** — it always works, interactive or he
 | `claude setup-token` | Sign in with a Claude Pro/Max account (one-time OAuth code, browser on any machine) |
 | `claude-token-save <token>` | Persist the 1-year token |
 | `claude-check-update` | Print `{"installed":…,"latest":…,"update_available":…}` as one JSON line |
+| `claude-daemon-status` | Batch mode: how many agents are running / queued (`--json` for scripts) |
 | `CLAUDE_CPUS=0,1 claude …` | Run on a CPU subset for this launch — no reinstall (default = all 4 cores) |
 
 ## Running many agents (batch mode)
@@ -76,8 +77,9 @@ claude -p "task 1" &  claude -p "task 2" &  …  claude -p "task 20" &
 
 Measured on the pad: **20 jobs → 3 run at a time until the queue drains → 20/20
 succeed**, with memory kept safe throughout. The daemon starts on the first job and
-stops on its own when idle. Leave `CLAUDE_DAEMON` unset for the plain behaviour;
-interactive `claude` always runs directly.
+stops on its own when idle. Watch it with `claude-daemon-status` (running / queued;
+`--json` to poll). Leave `CLAUDE_DAEMON` unset for the plain behaviour; interactive
+`claude` always runs directly.
 
 ## Updating (OTA)
 
