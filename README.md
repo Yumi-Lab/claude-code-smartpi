@@ -107,10 +107,11 @@ agents at once, use the batch mode above rather than launching them all directly
 ## Sister projects (same board, other CLIs)
 
 - [grok-cli-smartpi](https://github.com/Yumi-Lab/grok-cli-smartpi) — official xAI Grok CLI.
-- [kimi-cli-smartpi](https://github.com/Yumi-Lab/kimi-cli-smartpi) — Moonshot Kimi CLI.
+- [kimi-cli-smartpi](https://github.com/Yumi-Lab/kimi-cli-smartpi) — Moonshot Kimi CLI (Python).
+- [kimi-code-smartpi](https://github.com/Yumi-Lab/kimi-code-smartpi) — Moonshot Kimi Code CLI (TypeScript successor), native via npm + Node 22.
 - [vibe-cli-smartpi](https://github.com/Yumi-Lab/vibe-cli-smartpi) — official Mistral Vibe CLI.
 
-All four are driven together by the [Yumi AI
+All five are driven together by the [Yumi AI
 Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway).
 
 ## Licensing
