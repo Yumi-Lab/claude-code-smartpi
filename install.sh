@@ -104,7 +104,13 @@ fetch_resumable() { # $1 url, $2 dest
     log "cached: $(basename "$dest") ($((remote/1048576)) MB) — skipping download"
     return 0
   fi
-  curl -fSL -C - --progress-bar -o "$dest" "$url"
+  if [ -t 1 ]; then
+    curl -fSL -C - --progress-bar -o "$dest" "$url"
+  else
+    # Non-tty (piped into a log, e.g. the gateway installer): no progress bar —
+    # it floods the log with hundreds of carriage-returned '#####' lines.
+    curl -fsSL -S -C - -o "$dest" "$url"
+  fi
 }
 
 # 1. Toolchain. Claude Code 2.1.212+ HARD-REQUIRES Node at runtime satisfying
@@ -162,11 +168,17 @@ find "$DL_CACHE" -name 'claude-*.bin' ! -name "$(basename "$binf")" -delete 2>/d
 fetch_resumable "$REL/$VER/$DL_PLATFORM/claude" "$binf" \
   || fail "download failed ($REL/$VER/$DL_PLATFORM/claude)"
 
-# 4. Carve out the JavaScript on-device.
-log "Extracting the JavaScript bundle…"
+# 4. Carve out the JavaScript on-device. Pure-Python scan of a ~240 MB binary
+#    on one core: 10-20 min on a fanless H3. Without a heartbeat this reads as
+#    a hang (measured 16 min of silence on a SmartPad, 26/07) — so tick.
+log "Extracting the JavaScript bundle… (single-core scan: 10-20 min on an H3 — not stuck)"
 ex="$(fetch_tmp shim/extract-bun-js.py)" || fail "cannot fetch shim/extract-bun-js.py"
+t0=$(date +%s)
+( while sleep 60; do log "  …still extracting ($(( ($(date +%s) - t0) / 60 )) min)"; done ) &
+ticker=$!
 python3 "$ex" "$binf" -o "$work/extracted" --label "$VER" >/dev/null \
-  || fail "JS extraction failed"
+  || { kill "$ticker" 2>/dev/null || true; fail "JS extraction failed"; }
+kill "$ticker" 2>/dev/null || true
 rm -f "$ex"
 cli="$work/extracted/claude-${VER}.cli.js"
 [ -f "$cli" ] || fail "extraction produced no cli.js"
