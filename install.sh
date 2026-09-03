@@ -10,8 +10,10 @@
 #   Since 2.1.113 the official CLI is a Bun-compiled binary (x64/arm64 only).
 #   But the readable JS is embedded in that binary. This installer:
 #     1. downloads the OFFICIAL binary from Anthropic (public URL, no account),
-#     2. carves out its JavaScript on-device (shim/extract-bun-js.py),
-#     3. lowers the `using` syntax for broad compatibility (esbuild --target=node20),
+#     2. extracts its JavaScript on-device (shim/extract-bun-js.py reads Bun's module
+#        table: ~1 640 ESM chunks + embedded assets since 2.1.242),
+#     3. rebundles the chunk graph into one CJS file and lowers the `using` syntax
+#        (shim/bundle-bunfs.mjs → esbuild --format=cjs --target=node20),
 #     4. runs it under Node 22 (installed from nodejs.org — 2.1.212+ hard-requires
 #        >=22.17.0) with a small Bun→Node shim (shim/bun-shim.mjs — ~15 APIs; the
 #        app already degrades gracefully on the Bun-only bits, "running under Node?").
@@ -168,10 +170,10 @@ find "$DL_CACHE" -name 'claude-*.bin' ! -name "$(basename "$binf")" -delete 2>/d
 fetch_resumable "$REL/$VER/$DL_PLATFORM/claude" "$binf" \
   || fail "download failed ($REL/$VER/$DL_PLATFORM/claude)"
 
-# 4. Carve out the JavaScript on-device. Pure-Python scan of a ~240 MB binary
-#    on one core: 10-20 min on a fanless H3. Without a heartbeat this reads as
-#    a hang (measured 16 min of silence on a SmartPad, 26/07) — so tick.
-log "Extracting the JavaScript bundle… (single-core scan: 10-20 min on an H3 — not stuck)"
+# 4. Extract the JavaScript on-device. The extractor reads Bun's module table (no full
+#    scan any more: seconds on a laptop, a few minutes at most on an H3 — the old carve
+#    took 10-20 min). Keep the heartbeat anyway: silence reads as a hang on a pad.
+log "Extracting the JavaScript bundle… (reading Bun's module table — not stuck)"
 ex="$(fetch_tmp shim/extract-bun-js.py)" || fail "cannot fetch shim/extract-bun-js.py"
 t0=$(date +%s)
 ( while sleep 60; do log "  …still extracting ($(( ($(date +%s) - t0) / 60 )) min)"; done ) &
@@ -181,24 +183,29 @@ python3 "$ex" "$binf" -o "$work/extracted" --label "$VER" >/dev/null \
 kill "$ticker" 2>/dev/null || true
 rm -f "$ex"
 cli="$work/extracted/claude-${VER}.cli.js"
+manifest="$work/extracted/claude-${VER}.manifest.json"
 [ -f "$cli" ] || fail "extraction produced no cli.js"
+# No manifest = Bun's module table was unreadable and the extractor fell back to carving
+# printable blocks, which misses most chunks since 2.1.242: refuse to build from that.
+[ -f "$manifest" ] || fail "extraction produced no manifest (module table unreadable — unknown Bun layout)"
 
-# 5. Lower `using` (Node 20 can't parse it) and gather the runtime deps Bun
-#    provides but Node doesn't. esbuild ships a linux-arm (armv7) binary.
+# 5. Rebundle the chunk graph into one CJS file, lower `using` (Node 20 can't parse it)
+#    and gather the runtime deps Bun provides but Node doesn't. esbuild ships a
+#    linux-arm (armv7) binary.
 log "Building the Node bundle (esbuild) + runtime deps…"
 mkdir -p "$work/build"
 ( cd "$work/build"
   printf '{"name":"b","private":true}\n' > package.json
   npm install --no-audit --no-fund --silent esbuild ws undici js-yaml >/dev/null 2>&1
 ) || fail "npm install (esbuild + deps) failed"
-printf 'export default ' > "$work/bundle.raw.mjs"
-cat "$cli" >> "$work/bundle.raw.mjs"
 # CJS (not ESM): the launcher runs the bundle through vm.Script to reuse a persisted V8
 # bytecode cache, and --format=cjs also lowers the `import.meta` the bundle uses (the reason
-# the old ESM wrapper existed). Same node20 target; still lowers `using`.
-"$work/build/node_modules/.bin/esbuild" "$work/bundle.raw.mjs" \
-  --outfile="$work/bundle.cjs" --format=cjs --target=node20 --platform=node --log-level=warning \
-  || fail "esbuild failed"
+# the old ESM wrapper existed). bundle-bunfs.mjs handles both the monolith (<= 2.1.241) and
+# the ESM-chunk layout (>= 2.1.242). Same node20 target; still lowers `using`.
+bb="$(fetch_tmp shim/bundle-bunfs.mjs)" || fail "cannot fetch shim/bundle-bunfs.mjs"
+node "$bb" --extracted "$work/extracted" --out "$work/bundle.cjs" \
+  --esbuild-dir "$work/build" --target node20 || fail "esbuild failed"
+rm -f "$bb"
 
 # 6. Assemble the install tree under $PREFIX/lib/claude-code.
 log "Installing to $LIB…"
@@ -211,6 +218,21 @@ $RMLIB mkdir -p "$LIB/node_modules"
 S=""; [ -w "$LIB" ] || S="$SUDO"
 $S install -m644 "$cli" "$LIB/cli.js"           # require base / __filename
 $S install -m644 "$work/bundle.cjs" "$LIB/bundle.cjs"   # vm.Script-cacheable, import.meta lowered
+# Embedded assets (bundled skills/README .md.zst, prompts…) → $LIB/assets/, where the
+# launcher's patched require() maps /$bunfs/root/…. Native .node modules are built for the
+# download platform, not armv7: skipped.
+$S mkdir -p "$LIB/assets"
+python3 - "$manifest" "$work/extracted" "$work/assets" <<'PY'
+import json, os, shutil, sys
+manifest, src, dst = sys.argv[1:4]
+for m in json.load(open(manifest))["modules"]:
+    if m["kind"] != "asset" or m["name"].endswith(".node") or not m.get("path"):
+        continue
+    rel = m["name"][len("/$bunfs/root/"):] if m["name"].startswith("/$bunfs/root/") else m["name"].lstrip("/")
+    os.makedirs(os.path.dirname(os.path.join(dst, rel)) or dst, exist_ok=True)
+    shutil.copy2(os.path.join(src, m["path"]), os.path.join(dst, rel))
+PY
+[ -d "$work/assets" ] && $S cp -R "$work/assets/." "$LIB/assets/"
 for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs shim/wire.mjs; do
   t="$(fetch_tmp "$f")" || fail "cannot fetch $f"
   $S install -m644 "$t" "$LIB/$(basename "$f")"; rm -f "$t"

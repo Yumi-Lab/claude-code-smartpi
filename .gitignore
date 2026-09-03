@@ -3,7 +3,8 @@ __pycache__/
 
 # Locally-built Anthropic bundle — never commit (built on-device by install.sh)
 cli.js
-bundle*.mjs
+bundle.mjs
+bundle.raw.mjs
 bundle*.cjs
 bundle.v8cache
 *.v8cache

@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -370,9 +372,58 @@ class TranspilerStub {
   scan() { return { imports: [], exports: [] }; }
 }
 
+// ------------------------------------------------------ embedded files ($bunfs)
+// A Bun standalone binary serves its embedded files (bundled skills/README .md.zst, prompt
+// templates, native addons) from a virtual filesystem rooted at /$bunfs/root/, and the app
+// reads them with plain fs calls: fs.readFileSync("/$bunfs/root/SKILL-….md.zst") followed by
+// Bun.zstdDecompressSync. Under Node those files live in assets/ next to this shim (put there
+// by install.sh / vendor-release.sh from the extractor's bunfs/ mirror), so every fs entry
+// point that takes a path is remapped. Native .node addons are not shipped (host-specific):
+// requiring one fails with MODULE_NOT_FOUND exactly where the feature is used, not earlier.
+export const BUNFS_ROOT = '/$bunfs/root/';
+export const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+export function resolveBunfsPath(p) {
+  return typeof p === 'string' && p.startsWith(BUNFS_ROOT)
+    ? path.join(ASSETS_DIR, p.slice(BUNFS_ROOT.length))
+    : p;
+}
+// require() of an embedded file, as Bun's loaders answer it: `text` (.md/.txt) → the file
+// contents, `file` (.zst/.asset) → the virtual path (read later through the remapped fs),
+// anything else (.node napi addons, plain JS) → a real require of the mapped file.
+const TEXT_EXTS = new Set(['.md', '.txt']);
+const PATH_EXTS = new Set(['.zst', '.asset']);
+export function requireBunfs(id, baseRequire) {
+  const ext = path.extname(id);
+  if (TEXT_EXTS.has(ext)) return fs.readFileSync(resolveBunfsPath(id), 'utf8');
+  if (PATH_EXTS.has(ext)) return id;
+  return baseRequire(resolveBunfsPath(id));
+}
+const FS_PATH_FUNCS = ['readFileSync', 'readFile', 'existsSync', 'statSync', 'stat', 'lstatSync', 'lstat',
+  'accessSync', 'access', 'realpathSync', 'realpath', 'openSync', 'open', 'createReadStream',
+  'readdirSync', 'readdir'];
+const FS_PROMISES_FUNCS = ['readFile', 'stat', 'lstat', 'access', 'realpath', 'open', 'readdir'];
+function wrapPathFn(orig) {
+  // keep sub-functions such as fs.realpathSync.native reachable on the wrapper
+  return Object.assign(function (p, ...rest) { return orig.call(this, resolveBunfsPath(p), ...rest); }, orig);
+}
+function remapBunfs() {
+  for (const name of FS_PATH_FUNCS) if (typeof fs[name] === 'function') fs[name] = wrapPathFn(fs[name]);
+  for (const name of FS_PROMISES_FUNCS) if (typeof fs.promises[name] === 'function') fs.promises[name] = wrapPathFn(fs.promises[name]);
+}
+
+// -------------------------------------------------------------------- zstd
+// Bun.zstd* → node:zlib (zstd landed in Node 22.15 / 23.8; older Node has no zstd at all).
+function zstdApi(name) {
+  if (typeof zlib[name] !== 'function') {
+    throw new Error(`Bun.${name}: node:zlib has no zstd support on ${process.version} (Node >= 22.15 required)`);
+  }
+  return zlib[name];
+}
+
 // ----------------------------------------------------------------- install
 export function installBunShim() {
   if (globalThis.Bun) return globalThis.Bun;
+  remapBunfs();
   const Bun = {
     // deliberately no `version`: runtime-detection then treats us as Node
     isStandaloneExecutable: false,
@@ -394,6 +445,10 @@ export function installBunShim() {
     semver: { order: cmpVer, satisfies: semverSatisfies },
     which,
     file: (p) => new BunFile(p),
+    zstdDecompressSync: (buf, opts) => zstdApi('zstdDecompressSync')(buf, opts),
+    zstdCompressSync: (buf, opts) => zstdApi('zstdCompressSync')(buf, opts),
+    zstdDecompress: (buf, opts) => new Promise((res, rej) => zstdApi('zstdDecompress')(buf, opts ?? {}, (e, out) => (e ? rej(e) : res(out)))),
+    zstdCompress: (buf, opts) => new Promise((res, rej) => zstdApi('zstdCompress')(buf, opts ?? {}, (e, out) => (e ? rej(e) : res(out)))),
     spawn: bunSpawn,
     spawnSync(cmd, opts = {}) {
       const r = spawnSync(cmd[0], cmd.slice(1), { cwd: opts.cwd, env: opts.env });

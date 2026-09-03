@@ -93,6 +93,32 @@ stops on its own when idle. Watch it with `claude-daemon-status` (running / queu
 - **Privileges:** root/sudo for the *first* install only. Updates run as any user
   that owns `/opt/claude-code` — the gateway service user updates without sudo.
 
+## How it works
+
+Anthropic ships Claude Code as a Bun-compiled native binary (no armv7 build). `install.sh`
+downloads the official binary for a supported platform and rebuilds it for Node on the board:
+
+1. `shim/extract-bun-js.py` reads the module table Bun serialises at the end of the binary
+   and writes every embedded file under its virtual name (`bunfs/root/…`). Since Claude Code
+   2.1.242 the application is not one 28 MB bundle any more but ~1 640 ES-module chunks plus
+   ~180 embedded assets (bundled skills and prompts as `.md.zst`, native addons); a plain
+   "largest text block" carve sees about 46 of those chunks, the module table sees all of them.
+2. `shim/bundle-bunfs.mjs` feeds that graph to esbuild, which produces one `bundle.cjs`
+   (chunks bundled, `using` lowered for Node 20+, `import.meta.require`/`dirname`/`url` mapped
+   onto their CommonJS names). Versions up to 2.1.241 (single CJS bundle) still take the old
+   path through the same script.
+3. `shim/claude.mjs` runs `bundle.cjs` through `vm.Script` with a persisted V8 bytecode cache;
+   `shim/bun-shim.mjs` provides the Bun API surface the app calls (`Bun.spawn`, `Bun.file`,
+   `stringWidth`, `Bun.zstdDecompressSync` via `node:zlib`…) and maps the virtual filesystem
+   (`/$bunfs/root/…`) onto `/opt/claude-code/assets/`. Native `.node` addons are not shipped:
+   the few features that need them fail at the point of use, nothing else.
+
+Status for the chunked layout (>= 2.1.242): validated on a macOS host with Node 22.23
+(`--version`, `--help`, `config list`, `mcp list`, lazy chunk loads, embedded skill files);
+**not yet re-measured on a pad** — the runtime bundle grew from 26 MB to 42 MB, so the memory
+and start-up figures below, measured on <= 2.1.241, need a fresh run on the board. zstd needs
+Node >= 22.15 (`install.sh` installs Node 22 on armv7l).
+
 ## Target hardware & measured performance
 
 Tested on a Yumi SmartPad (Allwinner H3, 4× Cortex-A7 @ 1.2 GHz, 1 GB RAM,

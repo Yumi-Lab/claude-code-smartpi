@@ -8,7 +8,10 @@
 // compilation entirely (~0 ms). Measured on the Smart Pi One: --version 8.4 s → 2.9 s.
 //
 // The bundle is CJS (esbuild --format=cjs, which also lowers the `import.meta` the app uses —
-// the reason the old ESM wrapper existed). It is invoked as a CJS factory, exactly as before.
+// the reason the old ESM wrapper existed). Two shapes, both produced by shim/bundle-bunfs.mjs:
+//   * <= 2.1.241 (monolith): module.exports.default is the Claude CJS factory → we call it.
+//   * >= 2.1.242 (ESM chunks bundled by esbuild): the app runs when the bundle is evaluated;
+//     nothing is exported, so there is nothing more to call.
 //
 // Cache validity is automatic: the whole $LIB is replaced on update (VERSION changes → cache
 // gone → rebuilt), and V8 rejects a cache built by a different engine (Node upgrade →
@@ -20,7 +23,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { Script } from 'node:vm';
 import os from 'node:os';
 import path from 'node:path';
-import { installBunShim } from './bun-shim.mjs';
+import { installBunShim, BUNFS_ROOT, requireBunfs } from './bun-shim.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,10 +63,9 @@ if (!script) {
   script = new Script(wrapped, { filename: appPath, cachedData: produced });
 }
 
-// require patching: Bun-only modules throw MODULE_NOT_FOUND, embedded /$bunfs/root assets map
-// to the local assets/ dir (unchanged from the ESM launcher).
+// require patching: Bun-only modules throw MODULE_NOT_FOUND, embedded /$bunfs/root files map
+// to the local assets/ dir (same mapping as the shim's fs remap — one source: bun-shim.mjs).
 const baseRequire = createRequire(appPath);
-const assetsDir = path.join(__dirname, 'assets');
 function patchedRequire(id) {
   if (typeof id === 'string') {
     if (id.startsWith('bun:')) {
@@ -71,12 +73,11 @@ function patchedRequire(id) {
       e.code = 'MODULE_NOT_FOUND';
       throw e;
     }
-    if (id.startsWith('/$bunfs/root/')) {
-      const f = path.join(assetsDir, id.slice('/$bunfs/root/'.length));
+    if (id.startsWith(BUNFS_ROOT)) {
       try {
-        return baseRequire(f);
-      } catch {
-        const e = new Error(`Cannot find embedded module '${id}' (asset not extracted)`);
+        return requireBunfs(id, baseRequire);
+      } catch (cause) {
+        const e = new Error(`Cannot find embedded module '${id}' (asset not extracted)`, { cause });
         e.code = 'MODULE_NOT_FOUND';
         throw e;
       }
@@ -88,12 +89,15 @@ patchedRequire.resolve = baseRequire.resolve.bind(baseRequire);
 patchedRequire.cache = baseRequire.cache;
 patchedRequire.main = undefined;
 
-// Run the outer CJS wrapper → module.exports.default = the Claude factory; then invoke it
-// exactly as the old launcher did (same this, same require, same argv/filename).
+// Run the outer CJS wrapper. Monolith bundles export the Claude factory as
+// module.exports.default: invoke it exactly as the old launcher did (same this, same require,
+// same argv/filename). Chunked bundles (>= 2.1.242) already ran the app at this point.
 const outerFn = script.runInThisContext();
 const outerModule = { exports: {} };
 outerFn(outerModule, outerModule.exports, patchedRequire, appPath, __dirname);
 const factory = (outerModule.exports && outerModule.exports.default) || outerModule.exports;
 
-const mod = { exports: {}, filename: appPath, id: '.', loaded: false };
-factory.call(mod.exports, mod.exports, patchedRequire, mod, appPath, path.dirname(appPath));
+if (typeof factory === 'function') {
+  const mod = { exports: {}, filename: appPath, id: '.', loaded: false };
+  factory.call(mod.exports, mod.exports, patchedRequire, mod, appPath, path.dirname(appPath));
+}
