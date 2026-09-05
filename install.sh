@@ -123,7 +123,18 @@ fetch_resumable() { # $1 url, $2 dest
 #    app shells out to rg) still comes from apt. Node is installed into /usr/local so
 #    `node`/`npm` resolve ahead of any Debian /usr/bin copy (no need to purge apt's).
 NODE_VERSION="${CLAUDE_NODE_VERSION:-v22.22.0}"    # pinned armv7l build satisfying the guard
-command -v rg >/dev/null || { log "Installing ripgrep…"; $SUDO apt-get update -qq; $SUDO apt-get install -y -qq ripgrep >/dev/null; }
+# apt runs non-interactively: the gateway's update button drives this script in a PTY
+# with no debconf frontend. xz is needed to unpack nodejs.org's .tar.xz and the DietPi
+# image ships without it; both packages are only ever missing on the first (root) install.
+apt_install() { $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y -qq "$@"; }
+pkgs=()
+command -v rg >/dev/null || pkgs+=(ripgrep)
+command -v xz >/dev/null || pkgs+=(xz-utils)
+if [ "${#pkgs[@]}" -gt 0 ]; then
+  log "Installing ${pkgs[*]}…"
+  apt_install update || true
+  apt_install install "${pkgs[@]}" >/dev/null || fail "apt-get install ${pkgs[*]} failed"
+fi
 
 node_ok() {   # does the resolved `node` satisfy Claude Code's engine guard?
   node -e 'const[a,b]=process.versions.node.split(".").map(Number);process.exit(((a===22&&b>=17)||(a>=24&&(a>24||b>=2)))?0:1)' 2>/dev/null
@@ -319,10 +330,10 @@ done
 # 10. Anti-freeze safety net (1 GB RAM). Optional: root/passwordless-sudo only —
 #     an unprivileged OTA update silently skips it (it was set up at install time).
 if [ -z "$SUDO" ] && [ "$(id -u)" -eq 0 ]; then
-  apt-get install -y -qq earlyoom >/dev/null 2>&1 \
+  apt_install install earlyoom >/dev/null 2>&1 \
     && systemctl enable --now earlyoom >/dev/null 2>&1 && log "earlyoom active" || true
 elif sudo -n true 2>/dev/null; then
-  sudo apt-get install -y -qq earlyoom >/dev/null 2>&1 \
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get -y -qq install earlyoom >/dev/null 2>&1 \
     && sudo systemctl enable --now earlyoom >/dev/null 2>&1 && log "earlyoom active" || true
 fi
 
