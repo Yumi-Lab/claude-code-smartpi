@@ -73,8 +73,12 @@ put() { # $1 src, $2 dest, $3 mode
 }
 
 # Fetch one of our repo files to a temp path: local clone if present, else raw GitHub.
+# The temp file keeps the source's extension: Node's ESM loader refuses to run a
+# .mjs script handed to it under a bare mktemp name (ERR_UNKNOWN_FILE_EXTENSION).
 fetch_tmp() { # $1 repo-relative path → prints temp file path
-  local tmpf; tmpf="$(mktemp)"
+  local tmpf base ext=""; base="$(basename "$1")"
+  case "$base" in *.*) ext=".${base##*.}";; esac
+  tmpf="$(mktemp --suffix="$ext")"
   if [ -n "$HERE" ] && [ -f "$HERE/$1" ]; then
     cat "$HERE/$1" > "$tmpf"
   else
