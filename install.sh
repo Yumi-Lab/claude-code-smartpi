@@ -218,8 +218,13 @@ mkdir -p "$work/build"
 # the old ESM wrapper existed). bundle-bunfs.mjs handles both the monolith (<= 2.1.241) and
 # the ESM-chunk layout (>= 2.1.242). Same node20 target; still lowers `using`.
 bb="$(fetch_tmp shim/bundle-bunfs.mjs)" || fail "cannot fetch shim/bundle-bunfs.mjs"
-node "$bb" --extracted "$work/extracted" --out "$work/bundle.cjs" \
-  --esbuild-dir "$work/build" --target node20 || fail "esbuild failed"
+# esbuild (Go) keeps the whole 1 633-module graph live: ~820 MB RSS on the H3 whatever the GC
+# settings, so a 1 GB board needs swap for this step (the pad images ship with 1 GB). Capping
+# the Go heap target stops the *garbage* from spilling into swap too — measured on the pad
+# with 2.1.261: swap peak 563 MB → 191 MB and ~7 % faster at 512 MiB; tighter caps only
+# cost time. Output is byte-identical either way.
+GOMEMLIMIT="${CLAUDE_ESBUILD_GOMEMLIMIT:-512MiB}" node "$bb" --extracted "$work/extracted" \
+  --out "$work/bundle.cjs" --esbuild-dir "$work/build" --target node20 || fail "esbuild failed"
 rm -f "$bb"
 
 # 6. Assemble the install tree under $PREFIX/lib/claude-code.
@@ -259,9 +264,9 @@ printf '%s\n' "$VER" > "$work/VERSION"
 $S install -m644 "$work/VERSION" "$LIB/VERSION"
 
 # 6b. Prime the V8 bytecode cache so EVERY launch is warm from the first (native behaviour).
-#     The launcher compiles the 26 MB bundle once (~7 s on the H3) and writes
-#     $LIB/bundle.v8cache; subsequent launches skip compilation (--version 8.4 s → 2.9 s on the
-#     Smart Pi One). Built by the installer, which owns $LIB after the chown above → shared,
+#     The launcher compiles the 42 MB bundle once (~15 s on the H3) and writes
+#     $LIB/bundle.v8cache; subsequent launches skip compilation (--version 8.3 s → 3.1 s on the
+#     Smart Pi One, 2.1.261). Built by the installer, which owns $LIB after the chown above → shared,
 #     mode 644, all users read it. A missing/rejected cache (Node upgrade, or a per-user
 #     read-only $LIB) is rebuilt automatically by the launcher, keyed on VERSION + running V8.
 log "Priming V8 bytecode cache (one-time compile)…"
