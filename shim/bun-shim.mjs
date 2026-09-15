@@ -427,6 +427,9 @@ export function installBunShim() {
   const Bun = {
     // deliberately no `version`: runtime-detection then treats us as Node
     isStandaloneExecutable: false,
+    // >= 2.1.269 calls `Bun.unsafe.setJITPolicy?.(1)` when the message loop starts: without
+    // `unsafe` that throws inside an async block and `claude -p` hangs with no output.
+    unsafe: { setJITPolicy() {} },
     hash: bunHash,
     stringWidth,
     stripANSI,
