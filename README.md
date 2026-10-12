@@ -4,9 +4,9 @@ The **official Anthropic Claude Code CLI** running on **Allwinner H3 / armv7l**
 (Smart Pi One, Yumi SmartPad) — hardware the official installer rejects as
 "64-bit only".
 
-It runs **natively, no emulation**, always on the **latest** version, and signs in
-with a **Claude Pro/Max account** (no API key). Full interactive interface, full
-agent mode.
+It runs **natively, no emulation**, on the **newest version that runs under Node**
+(currently 2.1.270, see [Version cap](#version-cap)), and signs in with a **Claude
+Pro/Max account** (no API key). Full interactive interface, full agent mode.
 
 ```
 ╭─────────────────────────────────────────────────╮
@@ -21,14 +21,14 @@ agent mode.
 
 ## Install
 
-**One command** — installs the newest Claude Code, and is also the updater (re-run
-any time to move to the latest):
+**One command** — installs the newest Claude Code this board can run, and is also the
+updater (re-run any time to move up):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install.sh | bash
 ```
 
-Pin a specific version instead of the newest:
+Pin a specific version instead (a pin bypasses the [version cap](#version-cap)):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install.sh | bash -s -- 2.1.212
@@ -84,7 +84,8 @@ stops on its own when idle. Watch it with `claude-daemon-status` (running / queu
 ## Updating (OTA)
 
 - **Check:** `claude-check-update` prints one JSON line —
-  `{"cli":"claude","installed":"2.1.212","latest":"2.1.215","update_available":true}`.
+  `{"cli":"claude","installed":"2.1.261","latest":"2.1.270","update_available":true}`.
+  `latest` is what `install.sh` would install: the newest release, capped at `MAX_VERSION`.
   This is the probe the [Yumi AI Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway)
   console polls for its update badge.
 - **Update:** re-run `install.sh` — that IS the updater (exits fast when already
@@ -116,6 +117,20 @@ downloads the official binary for a supported platform and rebuilds it for Node 
 
 Both layouts are built by the same script and verified end to end on a pad (see the
 measurements below). zstd needs Node >= 22.15 (`install.sh` installs Node 22 on armv7l).
+
+## Version cap
+
+`install.sh` installs the newest release **up to `MAX_VERSION`** (repo root, currently
+**2.1.270**), and `claude-check-update` reports the same capped version, so the gateway badge
+only offers what can actually run. From **2.1.271**, the interactive screen is drawn by
+`Bun.ant.CellSegmenter`, a native cell engine (graphemes, widths, SGR runs, links) that only
+Anthropic's internal Bun build provides. Under Node, `claude -p` still starts and reaches the
+API, but the full-screen interface stays blank. Running those versions would need a JavaScript
+port of that engine.
+
+Raising the cap = verify a newer release on a pad, then bump the one line in `MAX_VERSION`;
+every pad sees the update on its next check. A pinned version (`install.sh 2.1.296`) bypasses
+the cap, for testing.
 
 ## Target hardware & measured performance
 

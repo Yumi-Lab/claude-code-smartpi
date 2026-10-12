@@ -33,9 +33,8 @@
 set -euo pipefail
 
 REPO="Yumi-Lab/claude-code-smartpi"
-RAW="https://raw.githubusercontent.com/${REPO}/main"
+RAW="https://raw.githubusercontent.com/${REPO}/main"   # bootstrap: fetches our own files
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || true)"
-REL="https://downloads.claude.ai/claude-code-releases"
 # The extracted JS is identical for every platform — we only need the bytes.
 DL_PLATFORM="${CLAUDE_DL_PLATFORM:-linux-arm64-musl}"
 PREFIX="${CLAUDE_PREFIX:-/opt/claude-code}"       # install root (payload)
@@ -86,6 +85,12 @@ fetch_tmp() { # $1 repo-relative path → prints temp file path
   fi
   printf '%s' "$tmpf"
 }
+
+# Release endpoint + "latest" resolution live in ONE place, shared with claude-check-update
+# (installed next to the payload's VERSION, step 6).
+rl="$(fetch_tmp lib/claude-release.sh)" || fail "cannot fetch lib/claude-release.sh"
+# shellcheck source=lib/claude-release.sh
+. "$rl"; rm -f "$rl"
 
 # Write $2 (a temp file) to $1 only when the content differs — routine updates
 # never touch $BINDIR (root-owned), so the unprivileged OTA path stays clean.
@@ -161,10 +166,11 @@ else
   log "Node now: $(node --version) / npm $(npm --version 2>/dev/null)."
 fi
 
-# 2. Resolve the target version, and stop right here when already on it.
+# 2. Resolve the target version, and stop right here when already on it. "latest" is the
+#    newest release capped at MAX_VERSION (see lib/claude-release.sh); a pin bypasses the cap.
 if [ "$VER" = "latest" ]; then
-  VER="$(curl -fsSL "$REL/latest" | tr -d '[:space:]')"
-  [ -n "$VER" ] || fail "could not resolve the latest version"
+  VER="$(claude_latest_version)"
+  [ -n "$VER" ] || fail "could not resolve the latest version ($CLAUDE_REL/latest, $CLAUDE_MAX_URL)"
 fi
 LIB="$PREFIX/lib/claude-code"
 CURRENT="$(head -1 "$LIB/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -182,8 +188,8 @@ work="$(mktemp -d -p /var/tmp claude-smartpi.XXXXXX)"; trap 'rm -rf "$work"' EXI
 log "Downloading the official Claude Code binary ($DL_PLATFORM, ~240 MB; resumes if interrupted)…"
 binf="$DL_CACHE/claude-$VER-$(printf '%s' "$DL_PLATFORM" | tr / -).bin"
 find "$DL_CACHE" -name 'claude-*.bin' ! -name "$(basename "$binf")" -delete 2>/dev/null || true
-fetch_resumable "$REL/$VER/$DL_PLATFORM/claude" "$binf" \
-  || fail "download failed ($REL/$VER/$DL_PLATFORM/claude)"
+fetch_resumable "$CLAUDE_REL/$VER/$DL_PLATFORM/claude" "$binf" \
+  || fail "download failed ($CLAUDE_REL/$VER/$DL_PLATFORM/claude)"
 
 # 4. Extract the JavaScript on-device. The extractor reads Bun's module table (no full
 #    scan any more: seconds on a laptop, a few minutes at most on an H3 — the old carve
@@ -253,7 +259,8 @@ for m in json.load(open(manifest))["modules"]:
     shutil.copy2(os.path.join(src, m["path"]), os.path.join(dst, rel))
 PY
 [ -d "$work/assets" ] && $S cp -R "$work/assets/." "$LIB/assets/"
-for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs shim/wire.mjs; do
+for f in shim/claude.mjs shim/bun-shim.mjs shim/claude-daemon.mjs shim/claude-client.mjs shim/wire.mjs \
+         lib/claude-release.sh; do
   t="$(fetch_tmp "$f")" || fail "cannot fetch $f"
   $S install -m644 "$t" "$LIB/$(basename "$f")"; rm -f "$t"
 done
@@ -371,6 +378,6 @@ Usage:
     CLAUDE_DAEMON=1 claude -p …   batch: queue many headless jobs, run only
                                   CLAUDE_MAX_CONCURRENT (default 3) at a time
 
-Update later:  re-run install.sh (fetches and builds the newest published version).
+Update later:  re-run install.sh (fetches and builds the newest version up to MAX_VERSION).
 Check first:   claude-check-update   →  {"installed":…,"latest":…,"update_available":…}
 MSG
