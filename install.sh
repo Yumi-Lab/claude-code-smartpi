@@ -169,6 +169,15 @@ else
   log "Node now: $(node --version) / npm $(npm --version 2>/dev/null)."
 fi
 
+# Helpers: token save + update probe (the OTA contract's JSON one-liner). Refreshed on EVERY
+# run, before the "already installed" exit below: a root re-run (the gateway installer) is the
+# only way a probe in the root-owned $BINDIR gets replaced, and it must not need a rebuild.
+for h in bin/claude-token-save bin/claude-check-update bin/claude-daemon-status; do
+  t="$(fetch_tmp "$h")" || { warn "cannot fetch $h (non-fatal)"; continue; }
+  put_if_changed "$BINDIR/$(basename "$h")" "$t" 755 \
+    || warn "cannot write $BINDIR/$(basename "$h") (no privileges) — existing copy kept."
+done
+
 # 2. Resolve the target version, and stop right here when already on it. "latest" is the
 #    newest release capped at MAX_VERSION (see lib/claude-release.sh); a pin bypasses the cap.
 if [ "$VER" = "latest" ]; then
@@ -339,14 +348,7 @@ json.dump(s, open(p, 'w'), indent=2)
 print('~/.claude/settings.json pinned:', ', '.join(sorted(env)))
 EOF
 
-# 9. Helpers: token save + update probe (the OTA contract's JSON one-liner).
-for h in bin/claude-token-save bin/claude-check-update bin/claude-daemon-status; do
-  t="$(fetch_tmp "$h")" || { warn "cannot fetch $h (non-fatal)"; continue; }
-  put_if_changed "$BINDIR/$(basename "$h")" "$t" 755 \
-    || warn "cannot write $BINDIR/$(basename "$h") (no privileges) — existing copy kept."
-done
-
-# 10. Anti-freeze safety net (1 GB RAM). Optional: root/passwordless-sudo only —
+# 9. Anti-freeze safety net (1 GB RAM). Optional: root/passwordless-sudo only —
 #     an unprivileged OTA update silently skips it (it was set up at install time).
 if [ -z "$SUDO" ] && [ "$(id -u)" -eq 0 ]; then
   apt_install install earlyoom >/dev/null 2>&1 \
