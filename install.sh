@@ -134,11 +134,14 @@ fetch_resumable() { # $1 url, $2 dest
 NODE_VERSION="${CLAUDE_NODE_VERSION:-v22.22.0}"    # pinned armv7l build satisfying the guard
 # apt runs non-interactively: the gateway's update button drives this script in a PTY
 # with no debconf frontend. xz is needed to unpack nodejs.org's .tar.xz and the DietPi
-# image ships without it; both packages are only ever missing on the first (root) install.
+# image ships without it; nodejs.org's armv7l node links libatomic.so.1, which the pad
+# images only carry as a glib dependency (a bare Debian armhf has none: node won't start).
+# These packages are only ever missing on the first (root) install.
 apt_install() { $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y -qq "$@"; }
 pkgs=()
 command -v rg >/dev/null || pkgs+=(ripgrep)
 command -v xz >/dev/null || pkgs+=(xz-utils)
+dpkg -s libatomic1 >/dev/null 2>&1 || pkgs+=(libatomic1)
 if [ "${#pkgs[@]}" -gt 0 ]; then
   log "Installing ${pkgs[*]}…"
   apt_install update || true
