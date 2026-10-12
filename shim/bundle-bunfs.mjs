@@ -23,8 +23,10 @@
 // In both cases `using`/`await using` are lowered for the target and the output has no
 // top-level ESM syntax. Bun-only `import.meta` members used by the chunks are mapped onto
 // their CommonJS equivalents (2.1.258: 382 `import.meta.require("/$bunfs/root/chunk-…")`
-// lazy chunk loads, 103 `import.meta.dirname`, 7 `import.meta.url`) — left as `{}` by the
-// cjs format they would make every lazy chunk load throw. The launcher runs the bundle
+// lazy chunk loads, 103 `import.meta.dirname`, 7 `import.meta.url`; 2.1.296 adds 7 Bun-only
+// `import.meta.dir` as the built-in plugins' hooks folder) — left as `{}` by the cjs format
+// they would make every lazy chunk load throw, and a missing `dir` makes the built-in plugin
+// listing throw in path.join, which ends `claude -p` silently. The launcher runs the bundle
 // inside a `(module, exports, require, __filename, __dirname)` wrapper, so those names exist.
 //
 // esbuild is resolved from --esbuild-dir (a directory holding node_modules/esbuild,
@@ -114,6 +116,7 @@ if (monolith) {
     define: {
       'import.meta.require': 'require',
       'import.meta.dirname': '__dirname',
+      'import.meta.dir': '__dirname',
       'import.meta.filename': '__filename',
       'import.meta.path': '__filename',
       'import.meta.url': '__bunfs_import_meta_url',

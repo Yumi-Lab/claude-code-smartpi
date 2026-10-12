@@ -465,6 +465,9 @@ export function installBunShim() {
     stdin: new BunFile('/dev/stdin'),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     sleepSync() {},
+    // JSC tuning knobs: since 2.1.269 the app calls `Bun.unsafe.setJITPolicy?.(1)` behind a bare
+    // `typeof Bun` check — the object must exist, its members are optional.
+    unsafe: {},
     env: process.env,
     argv: process.argv,
   };
