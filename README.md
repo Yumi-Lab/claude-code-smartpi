@@ -34,6 +34,12 @@ Pin a specific version instead (a pin bypasses the [version cap](#version-cap)):
 curl -fsSL https://raw.githubusercontent.com/Yumi-Lab/claude-code-smartpi/main/install.sh | bash -s -- 2.1.212
 ```
 
+**In mainland China** (measured from a Hangzhou fibre line, October 2026): GitHub, nodejs.org
+and npm answer, but `downloads.claude.ai` (Google Cloud) does not, and `api.anthropic.com`
+returns `403 Request not allowed` to Chinese IPs. Route both hosts through a VPN with an exit
+outside mainland China before installing; through a German exit the binary came down at
+2.6 MB/s and the API answered.
+
 Then sign in (headless, no local browser needed):
 
 ```bash
