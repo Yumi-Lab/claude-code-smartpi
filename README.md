@@ -196,9 +196,11 @@ agents at once, use the batch mode above rather than launching them all directly
 - [kimi-cli-smartpi](https://github.com/Yumi-Lab/kimi-cli-smartpi) — Moonshot Kimi CLI (Python).
 - [kimi-code-smartpi](https://github.com/Yumi-Lab/kimi-code-smartpi) — Moonshot Kimi Code CLI (TypeScript successor), native via npm + Node 22.
 - [vibe-cli-smartpi](https://github.com/Yumi-Lab/vibe-cli-smartpi) — official Mistral Vibe CLI.
+- [codex-cli-smartpi](https://github.com/Yumi-Lab/codex-cli-smartpi) — official OpenAI Codex CLI.
+- [letta-code-smartpi](https://github.com/Yumi-Lab/letta-code-smartpi) — Letta Code CLI, native via npm + Node 22.
 
-All five are driven together by the [Yumi AI
-Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway).
+The [Yumi AI Gateway](https://github.com/Yumi-Lab/yumi-ai-gateway) drives Claude, Grok, Kimi
+and Vibe from one console.
 
 ## Licensing
 
