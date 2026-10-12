@@ -98,7 +98,9 @@ stops on its own when idle. Watch it with `claude-daemon-status` (running / queu
   newest; `CLAUDE_FORCE=1` to rebuild). Do not run `claude update`; auto-update is
   disabled on this platform.
 - **Privileges:** root/sudo for the *first* install only. Updates run as any user
-  that owns `/opt/claude-code` — the gateway service user updates without sudo.
+  that owns `/opt/claude-code` — the gateway service user updates without sudo. The
+  helpers in `/usr/local/bin` (`claude-check-update`…) stay root-owned: a root re-run,
+  such as the gateway installer, refreshes them even when Claude Code is already current.
 
 ## How it works
 
@@ -185,6 +187,11 @@ out for the duration of the build either way and recovers on its own.
 
 For comparison, ≤ 2.1.241 (26 MB monolith) measured 2.9 s / ~24 s / ~137 MB on the same
 class of board: the chunked layout costs ~45 MB more per runtime and nothing on latency.
+
+**2.1.270** (12 October 2026, same pad, OTA update from 2.1.261 as the unprivileged gateway
+user): `bundle.cjs` 43.7 MB, `claude --version` warm 3.3 s, interactive screen renders through
+onboarding and sign-in, `claude -p` reaches the API in 25 s. The update took 45 min, nearly all
+of it the download over a 4G link running at ~55 KB/s that day.
 
 **OTA path** verified on the same pad: the gateway's update badge
 (`GET /admin/cli/updates`) reports `installed 2.1.261, update_available false` from
